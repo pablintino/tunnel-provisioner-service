@@ -1,4 +1,4 @@
-# mikrotik-wireguard-provisioner-service
+# tunnel-provisioner-service
 
 
 
@@ -15,14 +15,14 @@ Already a pro? Just edit this README.md and make it your own. Want to make it ea
 
 ```
 cd existing_repo
-git remote add origin https://gitlab.internal.pablintino.net/pablintino-arq/mikrotik-wireguard-provisioner-service.git
+git remote add origin https://gitlab.internal.pablintino.net/pablintino-arq/tunnel-provisioner-service.git
 git branch -M main
 git push -uf origin main
 ```
 
 ## Integrate with your tools
 
-- [ ] [Set up project integrations](https://gitlab.internal.pablintino.net/pablintino-arq/mikrotik-wireguard-provisioner-service/-/settings/integrations)
+- [ ] [Set up project integrations](https://gitlab.internal.pablintino.net/pablintino-arq/tunnel-provisioner-service/-/settings/integrations)
 
 ## Collaborate with your team
 
