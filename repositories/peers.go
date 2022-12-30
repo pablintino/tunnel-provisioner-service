@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/models"
 
@@ -15,7 +16,7 @@ const (
 
 type WireguardPeersRepository interface {
 	GetPeers(user string) ([]*models.WireguardPeerModel, error)
-	SavePeer(peer *models.WireguardPeerModel) error
+	SavePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error)
 }
 
 type WireguardPeersRepositoryImpl struct {
@@ -27,12 +28,13 @@ func NewPeersRepositoryImpl(db *mongo.Database) *WireguardPeersRepositoryImpl {
 	return &WireguardPeersRepositoryImpl{db: db, peersCollection: db.Collection(peersCollection)}
 }
 
-func (r *WireguardPeersRepositoryImpl) SavePeer(peer *models.WireguardPeerModel) error {
-	//result, err := r.peersCollection.InsertOne(context.TODO(), peer)
-	//if err != nil {
-	//	return err
-	//}
-	return nil
+func (r *WireguardPeersRepositoryImpl) SavePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error) {
+	result, err := r.peersCollection.InsertOne(context.TODO(), peer)
+	if err != nil {
+		return nil, err
+	}
+	peer.Id = result.InsertedID.(primitive.ObjectID)
+	return peer, nil
 
 }
 

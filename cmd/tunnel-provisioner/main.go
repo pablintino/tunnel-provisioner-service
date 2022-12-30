@@ -28,6 +28,11 @@ func main() {
 		logging.Logger.Errorw("Error reading service configuration", "error", err)
 		return
 	}
+	err = serviceConfig.Validate()
+	if err != nil {
+		logging.Logger.Errorw("Configuration validation error", "error", err)
+		return
+	}
 
 	// Connect to MongoDB
 	mongoconn := options.Client().ApplyURI(serviceConfig.MongoDBConfiguration.MongoURI)
@@ -45,7 +50,11 @@ func main() {
 	peersRepository := repositories.NewPeersRepositoryImpl(db)
 
 	userService := services.NewUserService(usersRepository)
-	wireguardService := services.NewWireguardService(peersRepository)
+	wireguardService, err := services.NewWireguardService(peersRepository, &serviceConfig)
+	if err != nil {
+		logging.Logger.Errorw("Error configuring/connecting to MongoDB", "error", err)
+		return
+	}
 
 	handlers.Register(echo, userService, wireguardService)
 

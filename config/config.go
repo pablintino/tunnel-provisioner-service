@@ -1,14 +1,16 @@
 package config
 
 import (
-	"github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/file"
-	"os"
-	"strings"
-
+	"errors"
+	"fmt"
 	"github.com/knadh/koanf"
+	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
+	"github.com/knadh/koanf/providers/file"
+	"net"
+	"os"
+	"strings"
 )
 
 type LDAPConfiguration struct {
@@ -55,6 +57,45 @@ type ServiceConfig struct {
 	Providers            ProvidersConfig      `koanf:"providers"`
 	ServicePort          uint16               `koanf:"port"`
 	DebugMode            bool                 `koanf:"debug"`
+}
+
+func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
+	tunnels := make(map[string]*WireguardTunnelConfiguration, 0)
+	for _, provider := range c.Providers.RouterOS {
+		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
+			profiles := make(map[string]*WireguardTunnelProfileConfiguration, 0)
+			for profileName, profile := range tunnelConfig.Profiles {
+				ranges := make([]net.IPNet, 0)
+
+				for _, ipRange := range profile.Ranges {
+					_, net, err := net.ParseCIDR(ipRange)
+					if err != nil {
+						return errors.New(fmt.Sprintf("Network range %s is invalid. %v", ipRange, err))
+					}
+					for _, existingRange := range ranges {
+						if existingRange.Contains(net.IP) || net.Contains(existingRange.IP) {
+							return errors.New(fmt.Sprintf("Network range %s overlaps %s", existingRange.String(), net.String()))
+						}
+					}
+					ranges = append(ranges, *net)
+				}
+
+				if _, ok := profiles[profileName]; ok {
+					return errors.New(fmt.Sprintf("Profile %s is duplicated", tunnelName))
+				}
+				profiles[profileName] = &profile
+			}
+			if _, ok := tunnels[tunnelName]; ok {
+				return errors.New(fmt.Sprintf("Tunnel %s is duplicated", tunnelName))
+			}
+			tunnels[tunnelName] = &tunnelConfig
+		}
+	}
+	return nil
+}
+
+func (c *ServiceConfig) Validate() error {
+	return c.validateRouterOSWireguardRanges()
 }
 
 var koanfInstance = koanf.New(".")
