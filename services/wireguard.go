@@ -2,7 +2,6 @@ package services
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -13,52 +12,95 @@ import (
 	"tunnel-provisioner-service/utils"
 )
 
+const (
+	wireguardAsyncRoutineChanSize = 128
+)
+
 type WireguardService interface {
 	ListPeers(username string) ([]*models.WireguardPeerModel, error)
-	CreatePeer(username, tunnelId, profileId string, description, psk *string) (*models.WireguardPeerModel, error)
+	CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireguardPeerModel, error)
+	DeletePeer(username, id string) error
+	GetPeer(username, id string)  (*models.WireguardPeerModel, error)
 	GetTunnels() []*models.WireguardTunnelInfo
 	GetTunnelInfo(tunnelId string) *models.WireguardTunnelInfo
 	GetProfileInfo(tunnelId, profileId string) *models.WireguardTunnelProfileInfo
+	Close()
 }
 
 type WireguardServiceImpl struct {
 	wireguardPeersRepository repositories.WireguardPeersRepository
 	taskChannel              chan interface{}
 	tunnels                  map[string]models.WireguardTunnelInfo
+	providers                map[string]WireguardTunnelProvider
 }
 
 type wireguardCreationTask struct {
-	Psk         *string
-	Description *string
-	Username    string
-	TaskId      string
-	Ranges      []net.IPNet
+	Peer              models.WireguardPeerModel
+	TunnelInfo        *models.WireguardTunnelInfo
+	TunnelProfileInfo *models.WireguardTunnelProfileInfo
 }
 
-func NewWireguardService(wireguardPeersRepository repositories.WireguardPeersRepository, config *config.ServiceConfig) (*WireguardServiceImpl, error) {
+type wireguardDeletionTask struct {
+	Peer       models.WireguardPeerModel
+	TunnelInfo *models.WireguardTunnelInfo
+}
 
-	taskChannel := make(chan interface{}, 128)
+func NewWireguardService(wireguardPeersRepository repositories.WireguardPeersRepository, config *config.ServiceConfig, providers map[string]WireguardTunnelProvider) (*WireguardServiceImpl, error) {
+
+	taskChannel := make(chan interface{}, wireguardAsyncRoutineChanSize)
 
 	wireguardService := &WireguardServiceImpl{
 		wireguardPeersRepository: wireguardPeersRepository,
 		taskChannel:              taskChannel,
 		tunnels:                  make(map[string]models.WireguardTunnelInfo),
+		providers:                providers,
 	}
 	wireguardService.buildTunnelInfo(config)
+	go wireguardService.wireguardAsyncRoutine()
 
 	return wireguardService, nil
+}
+
+func (u *WireguardServiceImpl) Close() {
+	close(u.taskChannel)
 }
 
 func (u *WireguardServiceImpl) ListPeers(username string) ([]*models.WireguardPeerModel, error) {
 	return u.wireguardPeersRepository.GetPeers(username)
 }
 
-func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId string, description, psk *string) (*models.WireguardPeerModel, error) {
+func (u *WireguardServiceImpl) GetPeer(username, id string) (*models.WireguardPeerModel, error) {
+	return u.wireguardPeersRepository.GetPeerById(username, id)
+}
+
+func (u *WireguardServiceImpl) DeletePeer(username, id string) error {
+	peer, err := u.wireguardPeersRepository.DeletePeer(username, id)
+	if err != nil {
+		return err
+	}
+
+	if peer != nil {
+		tunnel, tunnelFound := u.tunnels[peer.TunnelId]
+		if !tunnelFound {
+			return fmt.Errorf("tunnel %s not for %s peer", peer.TunnelId, id)
+		}
+
+		creationTask := wireguardDeletionTask{
+			Peer:       *peer, // Pass a mandatory copy (avoid changing the passed reference)
+			TunnelInfo: &tunnel,
+		}
+		u.taskChannel <- creationTask
+	}
+	return nil
+}
+
+func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireguardPeerModel, error) {
 
 	profile, profileFound := u.tunnels[tunnelId].Profiles[profileId]
 	if !profileFound {
-		return nil, errors.New(fmt.Sprintf("Profile %s not for tunnel %s found", profileId, tunnelId))
+		return nil, fmt.Errorf("profile %s not for tunnel %s found", profileId, tunnelId)
 	}
+	tunnel := u.tunnels[tunnelId]
 
 	peer := &models.WireguardPeerModel{
 		Username:     username,
@@ -77,11 +119,9 @@ func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId string, 
 	}
 
 	creationTask := wireguardCreationTask{
-		Psk:         psk,
-		Description: description,
-		Username:    username,
-		TaskId:      peer.Id.Hex(),
-		Ranges:      profile.Ranges,
+		Peer:              *peer, // Pass a mandatory copy (avoid changing the passed reference)
+		TunnelProfileInfo: &profile,
+		TunnelInfo:        &tunnel,
 	}
 	u.taskChannel <- creationTask
 
@@ -110,17 +150,76 @@ func (u *WireguardServiceImpl) GetProfileInfo(tunnelId, profileId string) *model
 	return nil
 }
 
-func (u *WireguardServiceImpl) wireguardSyncRoutine() {
-	p := <-u.taskChannel
-	switch p := p.(type) {
+func (u *WireguardServiceImpl) wireguardAsyncRoutine() {
+	for {
+		p, ok := <-u.taskChannel
+		if !ok {
+			logging.Logger.Debug("Exiting the wireguardAsyncRoutine")
+			return
+		}
+		switch p := p.(type) {
+		case wireguardCreationTask:
+			u.handleWireguardCreationTask(p)
+		case wireguardDeletionTask:
+			u.handleWireguardDeletionTask(p)
+		default:
+			fmt.Printf("Type of p is %T. Value %v", p, p)
+		}
 
-	default:
-		fmt.Printf("Type of p is %T. Value %v", p, p)
+	}
+}
+
+func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletionTask) {
+	if task.Peer.State == models.ProvisionStateProvisioned && len(task.Peer.PublicKey) != 0 {
+		provider, ok := u.providers[task.TunnelInfo.Provider]
+		if !ok {
+			logging.Logger.Errorw("wireguardDeletionTask task failed to acquire provider", "provider", task.TunnelInfo.Provider)
+			return
+		}
+
+		if err := provider.DeletePeer(task.Peer.PublicKey, task.TunnelInfo); err != nil {
+			// TODO This log need String methods properly implemented
+			logging.Logger.Errorw("wireguardCreationTask task failed to delete peer", "provider", task.TunnelInfo.Provider, "peer", task.Peer, "tunnel", task.TunnelInfo)
+		}
+	}
+}
+
+func (u *WireguardServiceImpl) handleWireguardCreationTask(task wireguardCreationTask) {
+	provider, ok := u.providers[task.TunnelInfo.Provider]
+	if !ok {
+		logging.Logger.Errorw("wireguardCreationTask task failed to acquire provider", "provider", task.TunnelInfo.Provider)
+		return
+	}
+
+	keys, err := provider.CreatePeer(task.Peer.Description, task.Peer.PreSharedKey, task.TunnelInfo, task.TunnelProfileInfo)
+	if err == nil {
+		task.Peer.PublicKey = keys.PublicKey
+		task.Peer.PrivateKey = keys.PrivateKey
+		task.Peer.State = models.ProvisionStateProvisioned
+
+		if _, err := u.wireguardPeersRepository.UpdatePeer(&task.Peer); err != nil {
+			u.setProvisionError(&task.Peer, err)
+		}
+	} else {
+		u.setProvisionError(&task.Peer, err)
+	}
+}
+
+func (u *WireguardServiceImpl) setProvisionError(peer *models.WireguardPeerModel, err error) {
+	peer.ProvisionStatus = err.Error()
+	peer.State = models.ProvisionStateError
+	if _, updateErr := u.wireguardPeersRepository.UpdatePeer(peer); updateErr != nil {
+		logging.Logger.Errorw(
+			"error updating peer provision state to error",
+			"original-error", err.Error(),
+			"update-error", err,
+			"peer", peer.Id.Hex(),
+		)
 	}
 }
 
 func (u *WireguardServiceImpl) buildTunnelInfo(config *config.ServiceConfig) {
-	for _, provider := range config.Providers.RouterOS {
+	for providerName, provider := range config.Providers.RouterOS {
 		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
 			profiles := make(map[string]models.WireguardTunnelProfileInfo, 0)
 			for profName, profile := range tunnelConfig.Profiles {
@@ -138,10 +237,11 @@ func (u *WireguardServiceImpl) buildTunnelInfo(config *config.ServiceConfig) {
 
 			tunnelId := utils.GenerateInternalIdFromString(tunnelName)
 			u.tunnels[tunnelId] = models.WireguardTunnelInfo{
-				Id:       tunnelId,
-				Name:     tunnelName,
-				Provider: models.ProviderTypeRouterOS,
-				Profiles: profiles,
+				Id:        tunnelId,
+				Name:      tunnelName,
+				Provider:  providerName,
+				Interface: tunnelConfig.Interface,
+				Profiles:  profiles,
 			}
 
 		}
@@ -153,7 +253,7 @@ func appendProfileRange(networkRange string, ranges []net.IPNet) []net.IPNet {
 	_, netRange, _ := net.ParseCIDR(networkRange)
 
 	for _, rangeAt := range ranges {
-		if netRange.IP.Equal(rangeAt.IP) && bytes.Compare((*netRange).Mask, rangeAt.Mask) == 0 {
+		if netRange.IP.Equal(rangeAt.IP) && bytes.Equal((*netRange).Mask, rangeAt.Mask) {
 			return ranges
 		}
 	}

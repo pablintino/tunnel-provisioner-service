@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"tunnel-provisioner-service/dtos"
 	"tunnel-provisioner-service/services"
+	"tunnel-provisioner-service/utils"
 
 	"github.com/labstack/echo/v4"
 )
@@ -26,8 +27,9 @@ func registerPeersHandler(group *echo.Group, wireguardService services.Wireguard
 	group.POST("/tunnels/:tid/profiles/:pid/peers", peersHandler.postTunnelProfilesPeersHandler)
 
 	group.GET("/peers", peersHandler.getPeersListHandler)
-	group.DELETE("/peers/:id", peersHandler.peersPutHandler)
-	group.PUT("/peers/:id", peersHandler.peersDeleteHandler)
+	group.GET("/peers/:id", peersHandler.getPeerByIdHandler)
+	group.DELETE("/peers/:id", peersHandler.peersDeleteHandler)
+	group.PUT("/peers/:id", peersHandler.peersPutHandler)
 }
 
 func (h *peersHandler) getPeersListHandler(c echo.Context) error {
@@ -66,8 +68,8 @@ func (h *peersHandler) postTunnelProfilesPeersHandler(c echo.Context) error {
 		getUsernameFromContext(c),
 		c.Param("tid"),
 		c.Param("pid"),
-		request.Description,
-		request.PreSharedKey,
+		utils.PointerToEmptyString(request.Description),
+		utils.PointerToEmptyString(request.PreSharedKey),
 	)
 	if err != nil {
 		return err
@@ -81,9 +83,26 @@ func (h *peersHandler) peersPutHandler(c echo.Context) error {
 	return nil
 }
 
+func (h *peersHandler) getPeerByIdHandler(c echo.Context) error {
+
+	peer, err := h.wireguardService.GetPeer(getUsernameFromContext(c), c.Param("id"))
+	if err != nil {
+		return err
+	}
+	if peer == nil {
+		return c.NoContent(http.StatusNotFound)
+	}
+	return c.JSON(http.StatusOK, dtos.ToWireguardPeerDto(peer))
+}
+
 func (h *peersHandler) peersDeleteHandler(c echo.Context) error {
 
-	return nil
+	err := h.wireguardService.DeletePeer(getUsernameFromContext(c), c.Param("id"))
+	if err != nil {
+		return err
+	}
+
+	return c.NoContent(http.StatusOK)
 }
 
 func (h *peersHandler) getTunnelProfileByIdHandler(c echo.Context) error {

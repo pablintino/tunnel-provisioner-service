@@ -30,21 +30,15 @@ func (e ProvisioningState) String() string {
 	}
 }
 
-const (
-	ProviderTypeRouterOS = iota
-)
-
-type ProviderType int
-
 type WireguardPeerModel struct {
 	Id              primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	Username        string             `json:"username,omitempty" bson:"username"`
-	PrivateKey      *string            `json:"private-key,omitempty" bson:"private-key"`
-	PublicKey       *string            `json:"public-key,omitempty" bson:"public-key"`
-	PreSharedKey    *string            `json:"psk,omitempty" bson:"psk"`
-	Description     *string            `json:"description,omitempty" bson:"description"`
+	PrivateKey      string             `json:"private-key,omitempty" bson:"private-key"`
+	PublicKey       string             `json:"public-key,omitempty" bson:"public-key"`
+	PreSharedKey    string             `json:"psk,omitempty" bson:"psk"`
+	Description     string             `json:"description,omitempty" bson:"description"`
 	State           ProvisioningState  `json:"state,omitempty" bson:"state"`
-	ProvisionStatus *string            `json:"provision-status,omitempty" bson:"provision-status"`
+	ProvisionStatus string             `json:"provision-status,omitempty" bson:"provision-status"`
 	CreationTime    time.Time          `json:"creation-time,omitempty" bson:"creation-time"`
 	ProfileId       string             `json:"profile-id,omitempty" bson:"profile-id"`
 	TunnelId        string             `json:"tunnel-id,omitempty" bson:"tunnel-id"`
@@ -72,8 +66,9 @@ type WireguardTunnelProfileInfo struct {
 }
 
 type WireguardTunnelInfo struct {
-	Id       string
-	Name     string
-	Provider ProviderType
-	Profiles map[string]WireguardTunnelProfileInfo
+	Id        string
+	Name      string
+	Provider  string
+	Interface string
+	Profiles  map[string]WireguardTunnelProfileInfo
 }

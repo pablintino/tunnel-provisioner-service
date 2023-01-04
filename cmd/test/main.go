@@ -2,10 +2,12 @@ package main
 
 import (
 	"flag"
-	"log"
-	"strings"
-
+	"fmt"
+	"github.com/mitchellh/mapstructure"
 	"gopkg.in/routeros.v2"
+	"log"
+	"net"
+	"strings"
 )
 
 var (
@@ -24,6 +26,21 @@ func dial() (*routeros.Client, error) {
 	return routeros.Dial(*address, *username, *password)
 }
 
+type RouterOSWireguardPeer struct {
+	PublicKey              string      `mapstructure:"public-key""`
+	EndpointPort           int         `mapstructure:"endpoint-port"`
+	CurrentEndpointAddress string      `mapstructure:"current-endpoint-address"`
+	AllowedAddress         []net.IPNet `mapstructure:"allowed-address"`
+	Tx                     int         `mapstructure:"tx""`
+	Comment                string      `mapstructure:"comment"`
+	Id                     string      `mapstructure:".id"`
+	Interface              string      `mapstructure:"interface"`
+	EndpointAddress        string      `mapstructure:"endpoint-address"`
+	CurrentEndpointPort    int         `mapstructure:"current-endpoint-port"`
+	Rx                     int         `mapstructure:"rx"`
+	Disabled               bool        `mapstructure:"disabled"`
+}
+
 func main() {
 	flag.Parse()
 
@@ -37,17 +54,49 @@ func main() {
 		c.Async()
 	}
 
-	// command2 := "/interface/wireguard/peers/add =interface=test-wg =public-key=wglIwKcVpuW6o7QxR0f/gdzJIhEXeWl8yHP70H2vNHU="
-	// r, err := c.RunArgs(strings.Split(command2, " "))
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-
-	command3 := "/interface/wireguard/peers/print ?interface=test-wg"
+	command3 := "/interface/wireguard/peers/print ?public-key=qHA5E9OS9FPppF+2qIKsSOIbY3I0bVX9y6e6RZ2QsRc="
 	r3, err3 := c.RunArgs(strings.Split(command3, " "))
 	if err3 != nil {
 		log.Fatal(err3)
 	}
 
-	log.Print(r3)
+	peerId := ""
+	var test RouterOSWireguardPeer
+	for _, sentence := range r3.Re {
+
+		err2 := WeakDecode(sentence.Map, &test)
+		if err2 != nil {
+			fmt.Print(err2)
+		}
+
+		if id, ok := sentence.Map[".id"]; ok {
+			peerId = id
+		}
+	}
+
+	log.Print(peerId)
+
+	//command4 := fmt.Sprintf("/interface/wireguard/peers/remove =.id=%s", peerId)
+	//r4, err4 := c.RunArgs(strings.Split(command4, " "))
+	//if err4 != nil {
+	//	log.Fatal(err4)
+	//}
+	//
+	//log.Print(r4)
+}
+
+func WeakDecode(input, output interface{}) error {
+	config := &mapstructure.DecoderConfig{
+		Metadata:         nil,
+		Result:           output,
+		WeaklyTypedInput: true,
+		DecodeHook:       mapstructure.ComposeDecodeHookFunc(mapstructure.StringToSliceHookFunc(","), mapstructure.StringToIPNetHookFunc()),
+	}
+
+	decoder, err := mapstructure.NewDecoder(config)
+	if err != nil {
+		return err
+	}
+
+	return decoder.Decode(input)
 }

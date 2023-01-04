@@ -1,35 +1,55 @@
 package services
 
 import (
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"strings"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/models"
 )
 
+type WireguardPeerKeyPair struct {
+	PublicKey, PrivateKey string
+}
+
 type WireguardTunnelProvider interface {
-	CreateTunnel(description string, psk *string) (*models.WireguardPeerModel, error)
+	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo) (*WireguardPeerKeyPair, error)
+	DeletePeer(publicKey string, tunnelInfo *models.WireguardTunnelInfo) error
+	Close()
 }
 
-type ROSWireguardRouterProvider struct {
-	config *config.RouterOSConfig
+func BuilderProvidersMap(config *config.ServiceConfig) map[string]WireguardTunnelProvider {
+	providersMap := make(map[string]WireguardTunnelProvider, 0)
+	for name, rosProviderConfig := range config.Providers.RouterOS {
+		providersMap[name] = NewROSWireguardRouterProvider(&rosProviderConfig, RouterOsRawApiClientFactory)
+	}
+
+	return providersMap
 }
 
-func (p *ROSWireguardRouterProvider) CreateTunnel(description string, psk *string) (*models.WireguardPeerModel, error) {
-	//peerPrivateKey, err := wgtypes.GeneratePrivateKey()
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	//peerPubKey := peerPrivateKey.PublicKey().String()
-	//peerPrivateKeyStr := peerPrivateKey.String()
-	//p.createPeer(peerPrivateKeyStr, peerPubKey, description, psk)
-	return nil, nil
-
+func CloseProviders(providersMap map[string]WireguardTunnelProvider) {
+	for _, provider := range providersMap {
+		provider.Close()
+	}
 }
 
-func (p *ROSWireguardRouterProvider) createPeer(pk, pubKey, description string, psk *string, addresses []string) error {
-	return nil
+func sanitizePskPubKeyCommand(command string, toMaskValues ...string) string {
+	res := command
+
+	for _, toMask := range toMaskValues {
+		if len(toMaskValues) != 0 {
+			res = strings.ReplaceAll(command, toMask, "<masked>")
+		}
+	}
+	return res
 }
 
-func (p *ROSWireguardRouterProvider) getInterfacePubKey(pk, pubKey, description string, psk *string, addresses []string) error {
-	return nil
+func buildWireguardApiPair() (*WireguardPeerKeyPair, error) {
+	peerPrivateKey, err := wgtypes.GeneratePrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	return &WireguardPeerKeyPair{
+		PublicKey:  peerPrivateKey.PublicKey().String(),
+		PrivateKey: peerPrivateKey.String(),
+	}, nil
 }

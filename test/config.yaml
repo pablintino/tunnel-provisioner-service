@@ -11,12 +11,14 @@ ldap:
   userClass: inetOrgPerson
 providers:
   routeros:
-    - host: 10.10.90.1
+    mk-test:
+      host: 10.10.80.1
       port: 8728
       username: apitest
       password: test12345
       wg-tunnels:
         wg-road-warriors:
+          interface: test-wg
           profiles:
             default-all:
               ranges:

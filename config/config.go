@@ -3,14 +3,15 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"strings"
+
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
-	"net"
-	"os"
-	"strings"
 )
 
 type LDAPConfiguration struct {
@@ -28,27 +29,25 @@ type WireguardTunnelProfileConfiguration struct {
 }
 
 type WireguardTunnelConfiguration struct {
-	Profiles map[string]WireguardTunnelProfileConfiguration `koanf:"profiles"`
+	Profiles  map[string]WireguardTunnelProfileConfiguration `koanf:"profiles"`
+	Interface string                                         `koanf:"interface"`
 }
 
 type RouterOSProviderConfig struct {
 	Host             string                                  `koanf:"host"`
-	Port             string                                  `koanf:"port"`
+	Port             int                                     `koanf:"port"`
 	Username         string                                  `koanf:"username"`
 	Password         string                                  `koanf:"password"`
 	WireguardTunnels map[string]WireguardTunnelConfiguration `koanf:"wg-tunnels"`
 }
 
 type ProvidersConfig struct {
-	RouterOS []RouterOSProviderConfig `koanf:"routeros"`
+	RouterOS map[string]RouterOSProviderConfig `koanf:"routeros"`
 }
 
 type MongoDBConfiguration struct {
 	MongoURI string `koanf:"uri"`
 	Database string `koanf:"database"`
-}
-
-type RouterOSConfig struct {
 }
 
 type ServiceConfig struct {

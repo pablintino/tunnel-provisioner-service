@@ -50,11 +50,16 @@ func main() {
 	peersRepository := repositories.NewPeersRepositoryImpl(db)
 
 	userService := services.NewUserService(usersRepository)
-	wireguardService, err := services.NewWireguardService(peersRepository, &serviceConfig)
+
+	providers := services.BuilderProvidersMap(&serviceConfig)
+	defer services.CloseProviders(providers)
+	wireguardService, err := services.NewWireguardService(peersRepository, &serviceConfig, providers)
 	if err != nil {
 		logging.Logger.Errorw("Error configuring/connecting to MongoDB", "error", err)
 		return
 	}
+
+	defer wireguardService.Close()
 
 	handlers.Register(echo, userService, wireguardService)
 

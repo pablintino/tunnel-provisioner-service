@@ -16,25 +16,39 @@ func GenerateInternalIdFromString(source string) string {
 	return hex.EncodeToString(sha1Hasher.Sum(nil)[:len(primitive.ObjectID{})])
 }
 
-func TryGetLastNDigits(source *string, digits int) string {
-	if source == nil {
-		return "<nil>"
+func TryGetLastNDigits(source string, digits int) string {
+	if len(source) == 0 {
+		return "<empty>"
 	}
 
-	if len(*source) > digits {
-		return (*source)[len(*source)-digits:]
+	if len(source) > digits {
+		return (source)[len(source)-digits:]
 	}
-	return *source
+	return source
 }
 
-func MasqueradeSensitiveString(source *string, showNDigits int) string {
-	if source == nil {
-		return "<nil>"
+func MasqueradeSensitiveString(source string, showNDigits int) string {
+	if len(source) == 0 {
+		return "<empty>"
 	}
 
 	exposedString := TryGetLastNDigits(source, showNDigits)
 	if len(exposedString) == showNDigits {
-		return strings.Repeat("*", len(*source)-showNDigits) + exposedString
+		return strings.Repeat("*", len(source)-showNDigits) + exposedString
 	}
 	return exposedString
+}
+
+func PointerToEmptyString(source *string) string{
+	if source == nil {
+		return ""
+	}
+	return *source
+}
+
+func StringToNilPointer(source string) *string{
+	if len(source) == 0{
+		return nil
+	}
+	return &source
 }
