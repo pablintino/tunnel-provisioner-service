@@ -20,7 +20,7 @@ type WireguardService interface {
 	ListPeers(username string) ([]*models.WireguardPeerModel, error)
 	CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireguardPeerModel, error)
 	DeletePeer(username, id string) error
-	GetPeer(username, id string)  (*models.WireguardPeerModel, error)
+	GetPeer(username, id string) (*models.WireguardPeerModel, error)
 	GetTunnels() []*models.WireguardTunnelInfo
 	GetTunnelInfo(tunnelId string) *models.WireguardTunnelInfo
 	GetProfileInfo(tunnelId, profileId string) *models.WireguardTunnelProfileInfo
@@ -29,6 +29,7 @@ type WireguardService interface {
 
 type WireguardServiceImpl struct {
 	wireguardPeersRepository repositories.WireguardPeersRepository
+	poolService              PoolService
 	taskChannel              chan interface{}
 	tunnels                  map[string]models.WireguardTunnelInfo
 	providers                map[string]WireguardTunnelProvider
@@ -45,12 +46,18 @@ type wireguardDeletionTask struct {
 	TunnelInfo *models.WireguardTunnelInfo
 }
 
-func NewWireguardService(wireguardPeersRepository repositories.WireguardPeersRepository, config *config.ServiceConfig, providers map[string]WireguardTunnelProvider) (*WireguardServiceImpl, error) {
+func NewWireguardService(
+	wireguardPeersRepository repositories.WireguardPeersRepository,
+	config *config.ServiceConfig,
+	providers map[string]WireguardTunnelProvider,
+	poolService PoolService,
+) (*WireguardServiceImpl, error) {
 
 	taskChannel := make(chan interface{}, wireguardAsyncRoutineChanSize)
 
 	wireguardService := &WireguardServiceImpl{
 		wireguardPeersRepository: wireguardPeersRepository,
+		poolService:              poolService,
 		taskChannel:              taskChannel,
 		tunnels:                  make(map[string]models.WireguardTunnelInfo),
 		providers:                providers,
@@ -102,6 +109,12 @@ func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId, descrip
 	}
 	tunnel := u.tunnels[tunnelId]
 
+	// TODO Needs custom error...
+	ip, err := u.poolService.GetNextIp(&tunnel)
+	if err != nil {
+		return nil, err
+	}
+
 	peer := &models.WireguardPeerModel{
 		Username:     username,
 		Description:  description,
@@ -109,10 +122,11 @@ func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId, descrip
 		State:        models.ProvisionStateProvisioning,
 		ProfileId:    profileId,
 		TunnelId:     tunnelId,
+		Ip:           ip,
 		CreationTime: time.Now(),
 	}
 
-	peer, err := u.wireguardPeersRepository.SavePeer(peer)
+	peer, err = u.wireguardPeersRepository.SavePeer(peer)
 	if err != nil {
 		logging.Logger.Errorw("Error saving Wireguard Peer", "peer", peer)
 		return nil, err
@@ -177,9 +191,28 @@ func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletio
 			return
 		}
 
+		if !task.Peer.Ip.IsUnspecified() {
+			err := u.poolService.RemoveIp(task.TunnelInfo, task.Peer.Ip)
+			if err != nil {
+				// TODO This log need String methods properly implemented
+				logging.Logger.Errorw(
+					"handleWireguardDeletionTask task failed to delete peer ip from pool",
+					"provider", task.TunnelInfo.Provider,
+					"peer", task.Peer,
+					"tunnel", task.TunnelInfo,
+					"ip", task.Peer.Ip.String(),
+				)
+			}
+		}
+
 		if err := provider.DeletePeer(task.Peer.PublicKey, task.TunnelInfo); err != nil {
 			// TODO This log need String methods properly implemented
-			logging.Logger.Errorw("wireguardCreationTask task failed to delete peer", "provider", task.TunnelInfo.Provider, "peer", task.Peer, "tunnel", task.TunnelInfo)
+			logging.Logger.Errorw(
+				"wireguardCreationTask task failed to delete peer",
+				"provider", task.TunnelInfo.Provider,
+				"peer", task.Peer,
+				"tunnel", task.TunnelInfo,
+			)
 		}
 	}
 }
@@ -191,7 +224,14 @@ func (u *WireguardServiceImpl) handleWireguardCreationTask(task wireguardCreatio
 		return
 	}
 
-	keys, err := provider.CreatePeer(task.Peer.Description, task.Peer.PreSharedKey, task.TunnelInfo, task.TunnelProfileInfo)
+	keys, err := provider.CreatePeer(
+		task.Peer.Description,
+		task.Peer.PreSharedKey,
+		task.TunnelInfo,
+		task.TunnelProfileInfo,
+		task.Peer.Ip,
+	)
+
 	if err == nil {
 		task.Peer.PublicKey = keys.PublicKey
 		task.Peer.PrivateKey = keys.PrivateKey

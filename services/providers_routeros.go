@@ -12,6 +12,7 @@ import (
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/models"
+	"tunnel-provisioner-service/utils"
 )
 
 const (
@@ -21,7 +22,7 @@ const (
 	routerOsApiDialTimeout     = 20 * time.Second
 )
 
-type routerOSWireguardPeer struct {
+type RouterOSWireguardPeer struct {
 	PublicKey              string      `mapstructure:"public-key""`
 	EndpointPort           int         `mapstructure:"endpoint-port"`
 	CurrentEndpointAddress string      `mapstructure:"current-endpoint-address"`
@@ -34,6 +35,17 @@ type routerOSWireguardPeer struct {
 	CurrentEndpointPort    int         `mapstructure:"current-endpoint-port"`
 	Rx                     int         `mapstructure:"rx"`
 	Disabled               bool        `mapstructure:"disabled"`
+}
+
+type RouterOSIpAddress struct {
+	Id              string        `mapstructure:".id"`
+	Address         utils.IPSlash `mapstructure:"address"`
+	Network         net.IP        `mapstructure:"network"` // Network base address, not an IP+Netmask
+	Interface       string        `mapstructure:"interface"`
+	ActualInterface string        `mapstructure:"actual-interface"`
+	Disabled        bool          `mapstructure:"disabled"`
+	Dynamic         bool          `mapstructure:"dynamic"`
+	Invalid         bool          `mapstructure:"invalid"`
 }
 
 type RouterOSRawApiClient interface {
@@ -79,8 +91,15 @@ func routerOsRawApiDecode(input, output interface{}) error {
 		Result:           output,
 		WeaklyTypedInput: true,
 		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToSliceHookFunc(","),
+			mapstructure.StringToIPHookFunc(),
 			mapstructure.StringToIPNetHookFunc(),
+			utils.StringToIPSlashHookFunc(),
+			mapstructure.ComposeDecodeHookFunc(
+				mapstructure.StringToSliceHookFunc(","),
+				utils.StringToIPSlashHookFunc(),
+				mapstructure.StringToIPNetHookFunc(),
+				mapstructure.StringToIPHookFunc(),
+			),
 		),
 	}
 
@@ -124,7 +143,10 @@ type ROSClientPool struct {
 	clientFactory func(config *config.RouterOSProviderConfig) (RouterOSRawApiClient, error)
 }
 
-func NewROSClientPool(config *config.RouterOSProviderConfig, clientFactory func(config *config.RouterOSProviderConfig) (RouterOSRawApiClient, error)) *ROSClientPool {
+func NewROSClientPool(
+	config *config.RouterOSProviderConfig,
+	clientFactory func(config *config.RouterOSProviderConfig) (RouterOSRawApiClient, error),
+) *ROSClientPool {
 
 	return &ROSClientPool{
 		config:        config,
@@ -193,7 +215,10 @@ type ROSWireguardRouterProvider struct {
 	clientPool *ROSClientPool
 }
 
-func NewROSWireguardRouterProvider(config *config.RouterOSProviderConfig, clientFactory func(config *config.RouterOSProviderConfig) (RouterOSRawApiClient, error)) *ROSWireguardRouterProvider {
+func NewROSWireguardRouterProvider(
+	config *config.RouterOSProviderConfig,
+	clientFactory func(config *config.RouterOSProviderConfig) (RouterOSRawApiClient, error),
+) *ROSWireguardRouterProvider {
 	return &ROSWireguardRouterProvider{config: config, clientPool: NewROSClientPool(config, clientFactory)}
 }
 
@@ -204,7 +229,33 @@ func (p *ROSWireguardRouterProvider) DeletePeer(publicKey string, _ *models.Wire
 	return err
 }
 
-func (p *ROSWireguardRouterProvider) CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo) (*WireguardPeerKeyPair, error) {
+func (p *ROSWireguardRouterProvider) GetInterfaceIp(name string) (net.IP, *net.IPNet, error) {
+	reply, err := p.clientPool.RunOnPool(func(rawClient RouterOSRawApiClient) (*routeros.Reply, error) {
+		return rawClient.RunArgs("/ip/address/print", fmt.Sprintf("?interface=%s", name))
+	})
+
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(reply.Re) != 1 {
+		return nil, nil, errors.New(fmt.Sprintf("cannot find interface %s", name))
+	}
+
+	var rosIpAddress RouterOSIpAddress
+	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosIpAddress); err != nil {
+		return nil, nil, err
+	}
+
+	netIp, netMask := utils.AlignNetMask(rosIpAddress.Network, rosIpAddress.Address.Mask)
+	return rosIpAddress.Address.IP, &net.IPNet{IP: netIp, Mask: netMask}, nil
+}
+
+func (p *ROSWireguardRouterProvider) CreatePeer(
+	description, psk string,
+	tunnelInfo *models.WireguardTunnelInfo,
+	profileInfo *models.WireguardTunnelProfileInfo,
+	peerAddress net.IP,
+) (*WireguardPeerKeyPair, error) {
 	for index := 0; index < routerOsKeyCreationRetries; index++ {
 
 		kp, err := buildWireguardApiPair()
@@ -213,7 +264,8 @@ func (p *ROSWireguardRouterProvider) CreatePeer(description, psk string, tunnelI
 		}
 
 		_, err = p.clientPool.RunOnPool(func(rawClient RouterOSRawApiClient) (*routeros.Reply, error) {
-			return addPeerToInterface(rawClient, tunnelInfo.Interface, kp.PublicKey, psk, description, profileInfo.Ranges)
+			return addPeerToInterface(rawClient, tunnelInfo.Interface, kp.PublicKey, psk, description,
+				profileInfo.Ranges, peerAddress)
 		})
 
 		if err != nil && routerOSResourceAlreadyExistsError(routerOSRetrieveApiErrorMessage(err)) {
@@ -234,7 +286,12 @@ func (p *ROSWireguardRouterProvider) Close() {
 	}
 }
 
-func addPeerToInterface(client RouterOSRawApiClient, iface, pubKey, psk, description string, networks []net.IPNet) (*routeros.Reply, error) {
+func addPeerToInterface(
+	client RouterOSRawApiClient,
+	iface, pubKey, psk, description string,
+	networks []net.IPNet,
+	peerAddress net.IP,
+) (*routeros.Reply, error) {
 	command := []string{
 		"/interface/wireguard/peers/add",
 		fmt.Sprintf("=interface=%s", iface),
@@ -252,13 +309,11 @@ func addPeerToInterface(client RouterOSRawApiClient, iface, pubKey, psk, descrip
 
 	command = append(command, fmt.Sprintf("=comment=%s", comment))
 
-	if len(networks) > 0 {
-		networksString := ""
-		for _, network := range networks {
-			networksString = networksString + fmt.Sprintf(",%s", network.String())
-		}
-		command = append(command, fmt.Sprintf("=allowed-address=%s", strings.Trim(networksString, ",")))
+	networksString := fmt.Sprintf("%s/32", peerAddress.String())
+	for _, network := range networks {
+		networksString = networksString + fmt.Sprintf(",%s", network.String())
 	}
+	command = append(command, fmt.Sprintf("=allowed-address=%s", strings.Trim(networksString, ",")))
 
 	logging.Logger.Debugw("ROS add peer to be run", "command", sanitizePskPubKeyCommand(strings.Join(command, " "), psk, pubKey))
 
@@ -284,7 +339,7 @@ func deletePeer(client RouterOSRawApiClient, pubKey string) (*routeros.Reply, er
 		return nil, errors.New("cannot find peer to be deleted")
 	}
 
-	var peer routerOSWireguardPeer
+	var peer RouterOSWireguardPeer
 	if err := routerOsRawApiDecode(reply.Re[0].Map, &peer); err != nil {
 		return nil, err
 	}

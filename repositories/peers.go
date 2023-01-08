@@ -28,7 +28,7 @@ type WireguardPeersRepositoryImpl struct {
 	peersCollection *mongo.Collection
 }
 
-func NewPeersRepositoryImpl(db *mongo.Database) *WireguardPeersRepositoryImpl {
+func NewPeersRepository(db *mongo.Database) *WireguardPeersRepositoryImpl {
 	return &WireguardPeersRepositoryImpl{db: db, peersCollection: db.Collection(peersCollection)}
 }
 
@@ -39,7 +39,6 @@ func (r *WireguardPeersRepositoryImpl) SavePeer(peer *models.WireguardPeerModel)
 	}
 	peer.Id = result.InsertedID.(primitive.ObjectID)
 	return peer, nil
-
 }
 
 func (r *WireguardPeersRepositoryImpl) UpdatePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error) {

@@ -12,9 +12,9 @@ import (
 
 var (
 	command  = flag.String("command", "/interface/wireguard/print", "RouterOS command")
-	address  = flag.String("address", "10.10.90.1:8728", "RouterOS address and port")
-	username = flag.String("username", "pablintino", "User name")
-	password = flag.String("password", "5.50GenD3", "Password")
+	address  = flag.String("address", "10.10.80.1:8728", "RouterOS address and port")
+	username = flag.String("username", "apitest", "User name")
+	password = flag.String("password", "test12345", "Password")
 	async    = flag.Bool("async", false, "Use async code")
 	useTLS   = flag.Bool("tls", false, "Use TLS")
 )
@@ -41,6 +41,17 @@ type RouterOSWireguardPeer struct {
 	Disabled               bool        `mapstructure:"disabled"`
 }
 
+type RouterOSIpAddress struct {
+	Id              string    `mapstructure:".id"`
+	Address         net.IPNet `mapstructure:"address"`
+	Network         net.IP    `mapstructure:"network"` // Network base address, not an IP+Netmask
+	Interface       string    `mapstructure:"interface"`
+	ActualInterface string    `mapstructure:"actual-interface"`
+	Disabled        bool      `mapstructure:"disabled"`
+	Dynamic         bool      `mapstructure:"dynamic"`
+	Invalid         bool      `mapstructure:"invalid"`
+}
+
 func main() {
 	flag.Parse()
 
@@ -54,14 +65,14 @@ func main() {
 		c.Async()
 	}
 
-	command3 := "/interface/wireguard/peers/print ?public-key=qHA5E9OS9FPppF+2qIKsSOIbY3I0bVX9y6e6RZ2QsRc="
+	command3 := "/ip/address/print ?interface=test-wg"
 	r3, err3 := c.RunArgs(strings.Split(command3, " "))
 	if err3 != nil {
 		log.Fatal(err3)
 	}
 
 	peerId := ""
-	var test RouterOSWireguardPeer
+	var test RouterOSIpAddress
 	for _, sentence := range r3.Re {
 
 		err2 := WeakDecode(sentence.Map, &test)
@@ -90,7 +101,14 @@ func WeakDecode(input, output interface{}) error {
 		Metadata:         nil,
 		Result:           output,
 		WeaklyTypedInput: true,
-		DecodeHook:       mapstructure.ComposeDecodeHookFunc(mapstructure.StringToSliceHookFunc(","), mapstructure.StringToIPNetHookFunc()),
+		DecodeHook: mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToIPHookFunc(),
+			mapstructure.StringToIPNetHookFunc(),
+			mapstructure.ComposeDecodeHookFunc(
+				mapstructure.StringToSliceHookFunc(","),
+				mapstructure.StringToIPNetHookFunc(), mapstructure.StringToIPHookFunc(),
+			),
+		),
 	}
 
 	decoder, err := mapstructure.NewDecoder(config)

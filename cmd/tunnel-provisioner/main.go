@@ -11,8 +11,6 @@ import (
 	"tunnel-provisioner-service/services"
 
 	"github.com/labstack/echo/v4"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func main() {
@@ -34,26 +32,25 @@ func main() {
 		return
 	}
 
-	// Connect to MongoDB
-	mongoconn := options.Client().ApplyURI(serviceConfig.MongoDBConfiguration.MongoURI)
-	mongoclient, err := mongo.Connect(context.TODO(), mongoconn)
+	mongoClient, err := repositories.BuildClient(serviceConfig.MongoDBConfiguration)
 	if err != nil {
-		logging.Logger.Errorw("Error configuring/connecting to MongoDB", "error", err)
 		return
 	}
+	defer mongoClient.Disconnect(context.TODO())
 
-	defer mongoclient.Disconnect(context.TODO())
-
-	db := mongoclient.Database(serviceConfig.MongoDBConfiguration.Database)
+	db := mongoClient.Database(serviceConfig.MongoDBConfiguration.Database)
 
 	usersRepository := repositories.NewLDAPUsersRepository(serviceConfig.LDAPConfiguration)
-	peersRepository := repositories.NewPeersRepositoryImpl(db)
+	peersRepository := repositories.NewPeersRepository(db)
+	ipPoolRepository := repositories.NewIpPoolRepository(db)
 
 	userService := services.NewUserService(usersRepository)
 
 	providers := services.BuilderProvidersMap(&serviceConfig)
 	defer services.CloseProviders(providers)
-	wireguardService, err := services.NewWireguardService(peersRepository, &serviceConfig, providers)
+
+	poolService := services.NewPoolService(ipPoolRepository, providers)
+	wireguardService, err := services.NewWireguardService(peersRepository, &serviceConfig, providers, poolService)
 	if err != nil {
 		logging.Logger.Errorw("Error configuring/connecting to MongoDB", "error", err)
 		return

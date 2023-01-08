@@ -1,6 +1,7 @@
 package dtos
 
 import (
+	"net"
 	"tunnel-provisioner-service/models"
 	"tunnel-provisioner-service/utils"
 )
@@ -10,6 +11,7 @@ type WireguardPeerDto struct {
 	Username        string  `json:"username,omitempty"`
 	PrivateKey      *string `json:"private-key,omitempty"`
 	PublicKey       *string `json:"public-key,omitempty"`
+	PeerIp          net.IP  `json:"peer-ip,omitempty"`
 	PreSharedKey    *string `json:"psk,omitempty"`
 	Description     *string `json:"description,omitempty"`
 	State           string  `json:"state,omitempty" bson:"state,omitempty"`
@@ -24,6 +26,7 @@ func ToWireguardPeerDto(model *models.WireguardPeerModel) *WireguardPeerDto {
 		PrivateKey:      utils.StringToNilPointer(model.PrivateKey),
 		PublicKey:       utils.StringToNilPointer(model.PublicKey),
 		PreSharedKey:    utils.StringToNilPointer(model.PreSharedKey),
+		PeerIp:          model.Ip,
 		Description:     utils.StringToNilPointer(model.Description),
 		ProvisionStatus: utils.StringToNilPointer(model.ProvisionStatus),
 	}

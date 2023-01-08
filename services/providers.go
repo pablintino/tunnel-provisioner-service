@@ -2,6 +2,7 @@ package services
 
 import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"net"
 	"strings"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/models"
@@ -12,8 +13,9 @@ type WireguardPeerKeyPair struct {
 }
 
 type WireguardTunnelProvider interface {
-	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo) (*WireguardPeerKeyPair, error)
+	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo, peerAddress net.IP) (*WireguardPeerKeyPair, error)
 	DeletePeer(publicKey string, tunnelInfo *models.WireguardTunnelInfo) error
+	GetInterfaceIp(name string) (net.IP, *net.IPNet, error)
 	Close()
 }
 
