@@ -17,10 +17,10 @@ const (
 )
 
 type WireguardService interface {
-	ListPeers(username string) ([]*models.WireguardPeerModel, error)
-	CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireguardPeerModel, error)
+	ListPeers(username string) ([]*models.WireGuardAggregatedPeerModel, error)
+	CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireGuardAggregatedPeerModel, error)
 	DeletePeer(username, id string) error
-	GetPeer(username, id string) (*models.WireguardPeerModel, error)
+	GetPeer(username, id string) (*models.WireGuardAggregatedPeerModel, error)
 	GetTunnels() []*models.WireguardTunnelInfo
 	GetTunnelInfo(tunnelId string) *models.WireguardTunnelInfo
 	GetProfileInfo(tunnelId, profileId string) *models.WireguardTunnelProfileInfo
@@ -65,6 +65,10 @@ func NewWireguardService(
 	wireguardService.buildTunnelInfo(config)
 	go wireguardService.wireguardAsyncRoutine()
 
+	for _, prov := range providers {
+		prov.SubscribePublicDNSResolution(wireguardService.onDdnsResolution)
+	}
+
 	return wireguardService, nil
 }
 
@@ -72,12 +76,34 @@ func (u *WireguardServiceImpl) Close() {
 	close(u.taskChannel)
 }
 
-func (u *WireguardServiceImpl) ListPeers(username string) ([]*models.WireguardPeerModel, error) {
-	return u.wireguardPeersRepository.GetPeers(username)
+func (u *WireguardServiceImpl) ListPeers(username string) ([]*models.WireGuardAggregatedPeerModel, error) {
+	peerModels, err := u.wireguardPeersRepository.GetPeers(username)
+	if err != nil {
+		return nil, err
+	}
+	peers := make([]*models.WireGuardAggregatedPeerModel, 0)
+	for _, peerModel := range peerModels {
+		aggPeer, err := u.buildAggregatedPeer(peerModel)
+		if err != nil {
+			return nil, err
+		}
+
+		peers = append(peers, aggPeer)
+	}
+
+	return peers, nil
 }
 
-func (u *WireguardServiceImpl) GetPeer(username, id string) (*models.WireguardPeerModel, error) {
-	return u.wireguardPeersRepository.GetPeerById(username, id)
+func (u *WireguardServiceImpl) GetPeer(username, id string) (*models.WireGuardAggregatedPeerModel, error) {
+	peer, err := u.wireguardPeersRepository.GetPeerById(username, id)
+	if err != nil {
+		return nil, err
+	} else if peer != nil {
+		return u.buildAggregatedPeer(peer)
+	} else {
+		return nil, nil
+	}
+
 }
 
 func (u *WireguardServiceImpl) DeletePeer(username, id string) error {
@@ -101,16 +127,14 @@ func (u *WireguardServiceImpl) DeletePeer(username, id string) error {
 	return nil
 }
 
-func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireguardPeerModel, error) {
-
-	profile, profileFound := u.tunnels[tunnelId].Profiles[profileId]
-	if !profileFound {
+func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireGuardAggregatedPeerModel, error) {
+	tunnel, profile := u.getTunnelConfigById(tunnelId, profileId)
+	if tunnel == nil || profile == nil {
 		return nil, fmt.Errorf("profile %s not for tunnel %s found", profileId, tunnelId)
 	}
-	tunnel := u.tunnels[tunnelId]
 
 	// TODO Needs custom error...
-	ip, err := u.poolService.GetNextIp(&tunnel)
+	ip, err := u.poolService.GetNextIp(tunnel)
 	if err != nil {
 		return nil, err
 	}
@@ -134,12 +158,12 @@ func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId, descrip
 
 	creationTask := wireguardCreationTask{
 		Peer:              *peer, // Pass a mandatory copy (avoid changing the passed reference)
-		TunnelProfileInfo: &profile,
-		TunnelInfo:        &tunnel,
+		TunnelProfileInfo: profile,
+		TunnelInfo:        tunnel,
 	}
 	u.taskChannel <- creationTask
 
-	return peer, nil
+	return &models.WireGuardAggregatedPeerModel{WireguardPeerModel: *peer, Networks: profile.Ranges}, nil
 }
 
 func (u *WireguardServiceImpl) GetTunnels() []*models.WireguardTunnelInfo {
@@ -162,6 +186,10 @@ func (u *WireguardServiceImpl) GetProfileInfo(tunnelId, profileId string) *model
 		return &profile
 	}
 	return nil
+}
+
+func (u *WireguardServiceImpl) onDdnsResolution(provider string, iface WireguardInterface) {
+	logging.Logger.Infow("onDdnsResolution", "iface", iface)
 }
 
 func (u *WireguardServiceImpl) wireguardAsyncRoutine() {
@@ -187,7 +215,10 @@ func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletio
 	if task.Peer.State == models.ProvisionStateProvisioned && len(task.Peer.PublicKey) != 0 {
 		provider, ok := u.providers[task.TunnelInfo.Provider]
 		if !ok {
-			logging.Logger.Errorw("wireguardDeletionTask task failed to acquire provider", "provider", task.TunnelInfo.Provider)
+			logging.Logger.Errorw(
+				"handleWireguardDeletionTask task failed to acquire provider",
+				"provider", task.TunnelInfo.Provider,
+			)
 			return
 		}
 
@@ -220,7 +251,10 @@ func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletio
 func (u *WireguardServiceImpl) handleWireguardCreationTask(task wireguardCreationTask) {
 	provider, ok := u.providers[task.TunnelInfo.Provider]
 	if !ok {
-		logging.Logger.Errorw("wireguardCreationTask task failed to acquire provider", "provider", task.TunnelInfo.Provider)
+		logging.Logger.Errorw(
+			"handleWireguardCreationTask failed to acquire provider",
+			"provider", task.TunnelInfo.Provider,
+		)
 		return
 	}
 
@@ -288,6 +322,15 @@ func (u *WireguardServiceImpl) buildTunnelInfo(config *config.ServiceConfig) {
 	}
 }
 
+func (u *WireguardServiceImpl) buildAggregatedPeer(peer *models.WireguardPeerModel) (*models.WireGuardAggregatedPeerModel, error) {
+	tunnel, profile := u.getTunnelConfigById(peer.TunnelId, peer.ProfileId)
+	if tunnel == nil || profile == nil {
+		return nil, fmt.Errorf("profile %s not for tunnel %s found", peer.TunnelId, peer.ProfileId)
+	}
+
+	return &models.WireGuardAggregatedPeerModel{WireguardPeerModel: *peer, Networks: profile.Ranges}, nil
+}
+
 func appendProfileRange(networkRange string, ranges []net.IPNet) []net.IPNet {
 	// Ignore error as config was validated before and ranges are parseable at this point
 	_, netRange, _ := net.ParseCIDR(networkRange)
@@ -299,4 +342,13 @@ func appendProfileRange(networkRange string, ranges []net.IPNet) []net.IPNet {
 	}
 
 	return append(ranges, *netRange)
+}
+
+func (u *WireguardServiceImpl) getTunnelConfigById(tunnelId, profileId string) (*models.WireguardTunnelInfo, *models.WireguardTunnelProfileInfo) {
+	if profile, ok := u.tunnels[tunnelId].Profiles[profileId]; !ok {
+		return nil, nil
+	} else {
+		tunnel := u.tunnels[tunnelId]
+		return &tunnel, &profile
+	}
 }

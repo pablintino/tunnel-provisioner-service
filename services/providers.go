@@ -1,28 +1,46 @@
 package services
 
 import (
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"fmt"
 	"net"
 	"strings"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/models"
+	"tunnel-provisioner-service/utils"
+
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 type WireguardPeerKeyPair struct {
 	PublicKey, PrivateKey string
 }
 
+type WireguardInterface struct {
+	Name      string
+	PublicKey string
+	Endpoint  string
+	Port      uint
+}
+
+func (w WireguardInterface) String() string {
+	return fmt.Sprintf("WireguardInterface[Name=%s, PublicKey=%s, Endpoint=%s, Port=%d]",
+		w.Name, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Endpoint, w.Port)
+}
+
+type WireguardInterfaceResolutionFunc func(provider string, iface WireguardInterface)
+
 type WireguardTunnelProvider interface {
 	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo, peerAddress net.IP) (*WireguardPeerKeyPair, error)
 	DeletePeer(publicKey string, tunnelInfo *models.WireguardTunnelInfo) error
 	GetInterfaceIp(name string) (net.IP, *net.IPNet, error)
+	SubscribePublicDNSResolution(cb WireguardInterfaceResolutionFunc)
 	Close()
 }
 
 func BuilderProvidersMap(config *config.ServiceConfig) map[string]WireguardTunnelProvider {
 	providersMap := make(map[string]WireguardTunnelProvider, 0)
 	for name, rosProviderConfig := range config.Providers.RouterOS {
-		providersMap[name] = NewROSWireguardRouterProvider(&rosProviderConfig, RouterOsRawApiClientFactory)
+		providersMap[name] = NewROSWireguardRouterProvider(name, &rosProviderConfig, RouterOsRawApiClientFactory)
 	}
 
 	return providersMap

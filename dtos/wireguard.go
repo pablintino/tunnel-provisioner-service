@@ -7,26 +7,33 @@ import (
 )
 
 type WireguardPeerDto struct {
-	Id              string  `json:"id,omitempty"`
-	Username        string  `json:"username,omitempty"`
-	PrivateKey      *string `json:"private-key,omitempty"`
-	PublicKey       *string `json:"public-key,omitempty"`
-	PeerIp          net.IP  `json:"peer-ip,omitempty"`
-	PreSharedKey    *string `json:"psk,omitempty"`
-	Description     *string `json:"description,omitempty"`
-	State           string  `json:"state,omitempty" bson:"state,omitempty"`
-	ProvisionStatus *string `json:"provision-status,omitempty"`
+	Id              string          `json:"id,omitempty"`
+	Username        string          `json:"username,omitempty"`
+	PrivateKey      *string         `json:"private-key,omitempty"`
+	PublicKey       *string         `json:"public-key,omitempty"`
+	PeerIp          net.IP          `json:"peer-ip,omitempty"`
+	PreSharedKey    *string         `json:"psk,omitempty"`
+	Description     *string         `json:"description,omitempty"`
+	State           string          `json:"state,omitempty" bson:"state,omitempty"`
+	ProvisionStatus *string         `json:"provision-status,omitempty"`
+	Networks        []utils.IPnMask `json:"networks,omitempty"` // net.IPNet cannot be json serialized
 }
 
-func ToWireguardPeerDto(model *models.WireguardPeerModel) *WireguardPeerDto {
+func ToWireguardPeerDto(model *models.WireGuardAggregatedPeerModel) *WireguardPeerDto {
+	nets := make([]utils.IPnMask, 0)
+	for _, ipMask := range model.Networks {
+		nets = append(nets, utils.NewIPnMaskFromNet(ipMask))
+	}
+
 	return &WireguardPeerDto{
 		Id:              model.Id.Hex(),
 		Username:        model.Username,
 		State:           model.State.String(),
+		PeerIp:          model.Ip,
+		Networks:        nets,
 		PrivateKey:      utils.StringToNilPointer(model.PrivateKey),
 		PublicKey:       utils.StringToNilPointer(model.PublicKey),
 		PreSharedKey:    utils.StringToNilPointer(model.PreSharedKey),
-		PeerIp:          model.Ip,
 		Description:     utils.StringToNilPointer(model.Description),
 		ProvisionStatus: utils.StringToNilPointer(model.ProvisionStatus),
 	}

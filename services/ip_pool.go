@@ -1,7 +1,6 @@
 package services
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -87,7 +86,7 @@ func (p *PoolServiceImpl) GetNextIp(tunnel *models.WireguardTunnelInfo) (net.IP,
 func (p *PoolServiceImpl) createIpPool(tunnel *models.WireguardTunnelInfo) (*models.IpPoolModel, error) {
 	provider, found := p.providers[tunnel.Provider]
 	if !found {
-		return nil, errors.New(fmt.Sprintf("cannot get pool ip cause cannot find %s provider", tunnel.Provider))
+		return nil, fmt.Errorf("cannot get pool ip cause cannot find %s provider", tunnel.Provider)
 	}
 
 	ip, network, err := provider.GetInterfaceIp(tunnel.Interface)

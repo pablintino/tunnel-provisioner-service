@@ -52,6 +52,26 @@ type RouterOSIpAddress struct {
 	Invalid         bool      `mapstructure:"invalid"`
 }
 
+type RouterOSIpCloud struct {
+	DdnsEnabled        bool   `mapstructure:"ddns-enabled"`
+	PublicAddress      net.IP `mapstructure:"public-address"`
+	PublicAddressIpv6  net.IP `mapstructure:"public-address-ipv6"`
+	DdnsUpdateInterval int    `mapstructure:"ddns-update-interval"`
+	UpdateTime         bool   `mapstructure:"update-time"`
+	DnsName            string `mapstructure:"dns-name"`
+	Status             string `mapstructure:"status"`
+}
+
+type RouterOSWireguardInterface struct {
+	Id         string `mapstructure:".id"`
+	Name       string `mapstructure:"name"`
+	Mtu        int    `mapstructure:"mtu"`
+	ListenPort uint   `mapstructure:"listen-port"`
+	PublicKey  string `mapstructure:"public-key"`
+	Running    bool   `mapstructure:"running"`
+	Disabled   bool   `mapstructure:"disabled"`
+}
+
 func main() {
 	flag.Parse()
 
@@ -65,27 +85,18 @@ func main() {
 		c.Async()
 	}
 
-	command3 := "/ip/address/print ?interface=test-wg"
+	command3 := "/interface/wireguard/print ?name=test-wg"
 	r3, err3 := c.RunArgs(strings.Split(command3, " "))
 	if err3 != nil {
 		log.Fatal(err3)
 	}
 
-	peerId := ""
-	var test RouterOSIpAddress
-	for _, sentence := range r3.Re {
-
-		err2 := WeakDecode(sentence.Map, &test)
-		if err2 != nil {
-			fmt.Print(err2)
-		}
-
-		if id, ok := sentence.Map[".id"]; ok {
-			peerId = id
-		}
+	var test RouterOSWireguardInterface
+	err2 := WeakDecode(r3.Re[0].Map, &test)
+	if err2 != nil {
+		fmt.Print(err2)
 	}
-
-	log.Print(peerId)
+	log.Print(test)
 
 	//command4 := fmt.Sprintf("/interface/wireguard/peers/remove =.id=%s", peerId)
 	//r4, err4 := c.RunArgs(strings.Split(command4, " "))

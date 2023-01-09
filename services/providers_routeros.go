@@ -3,8 +3,6 @@ package services
 import (
 	"errors"
 	"fmt"
-	"github.com/mitchellh/mapstructure"
-	"gopkg.in/routeros.v2"
 	"net"
 	"strings"
 	"sync"
@@ -13,6 +11,9 @@ import (
 	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/models"
 	"tunnel-provisioner-service/utils"
+
+	"github.com/mitchellh/mapstructure"
+	"gopkg.in/routeros.v2"
 )
 
 const (
@@ -20,14 +21,15 @@ const (
 	routerOsPoolSize           = 5
 	clientLifeTime             = 1 * time.Minute
 	routerOsApiDialTimeout     = 20 * time.Second
+	dnsResolutionPeriod        = 1 * time.Hour
 )
 
 type RouterOSWireguardPeer struct {
-	PublicKey              string      `mapstructure:"public-key""`
+	PublicKey              string      `mapstructure:"public-key"`
 	EndpointPort           int         `mapstructure:"endpoint-port"`
 	CurrentEndpointAddress string      `mapstructure:"current-endpoint-address"`
 	AllowedAddress         []net.IPNet `mapstructure:"allowed-address"`
-	Tx                     int         `mapstructure:"tx""`
+	Tx                     int         `mapstructure:"tx"`
 	Comment                string      `mapstructure:"comment"`
 	Id                     string      `mapstructure:".id"`
 	Interface              string      `mapstructure:"interface"`
@@ -37,15 +39,35 @@ type RouterOSWireguardPeer struct {
 	Disabled               bool        `mapstructure:"disabled"`
 }
 
+type RouterOSWireguardInterface struct {
+	Id         string `mapstructure:".id"`
+	Name       string `mapstructure:"name"`
+	Mtu        int    `mapstructure:"mtu"`
+	ListenPort uint   `mapstructure:"listen-port"`
+	PublicKey  string `mapstructure:"public-key"`
+	Running    bool   `mapstructure:"running"`
+	Disabled   bool   `mapstructure:"disabled"`
+}
+
 type RouterOSIpAddress struct {
 	Id              string        `mapstructure:".id"`
-	Address         utils.IPSlash `mapstructure:"address"`
+	Address         utils.IPnMask `mapstructure:"address"`
 	Network         net.IP        `mapstructure:"network"` // Network base address, not an IP+Netmask
 	Interface       string        `mapstructure:"interface"`
 	ActualInterface string        `mapstructure:"actual-interface"`
 	Disabled        bool          `mapstructure:"disabled"`
 	Dynamic         bool          `mapstructure:"dynamic"`
 	Invalid         bool          `mapstructure:"invalid"`
+}
+
+type RouterOSIpCloud struct {
+	DdnsEnabled        bool   `mapstructure:"ddns-enabled"`
+	PublicAddress      net.IP `mapstructure:"public-address"`
+	PublicAddressIpv6  net.IP `mapstructure:"public-address-ipv6"`
+	DdnsUpdateInterval *uint  `mapstructure:"ddns-update-interval"`
+	UpdateTime         bool   `mapstructure:"update-time"`
+	DnsName            string `mapstructure:"dns-name"`
+	Status             string `mapstructure:"status"`
 }
 
 type RouterOSRawApiClient interface {
@@ -90,17 +112,7 @@ func routerOsRawApiDecode(input, output interface{}) error {
 		Metadata:         nil,
 		Result:           output,
 		WeaklyTypedInput: true,
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToIPHookFunc(),
-			mapstructure.StringToIPNetHookFunc(),
-			utils.StringToIPSlashHookFunc(),
-			mapstructure.ComposeDecodeHookFunc(
-				mapstructure.StringToSliceHookFunc(","),
-				utils.StringToIPSlashHookFunc(),
-				mapstructure.StringToIPNetHookFunc(),
-				mapstructure.StringToIPHookFunc(),
-			),
-		),
+		DecodeHook:       buildRosApiDecodeHook(),
 	}
 
 	decoder, err := mapstructure.NewDecoder(config)
@@ -109,6 +121,22 @@ func routerOsRawApiDecode(input, output interface{}) error {
 	}
 
 	return decoder.Decode(input)
+}
+
+func buildRosApiDecodeHook() mapstructure.DecodeHookFunc {
+	return mapstructure.ComposeDecodeHookFunc(
+		mapstructure.StringToIPHookFunc(),
+		mapstructure.StringToIPNetHookFunc(),
+		utils.StringToIPnMaskHookFunc(),
+		utils.CustomNullablePtrHookFunc("none"),
+		mapstructure.ComposeDecodeHookFunc(
+			mapstructure.StringToSliceHookFunc(","),
+			utils.StringToIPnMaskHookFunc(),
+			mapstructure.StringToIPNetHookFunc(),
+			mapstructure.StringToIPHookFunc(),
+			utils.CustomNullablePtrHookFunc("none"),
+		),
+	)
 }
 
 type ROSClientPoolEntry struct {
@@ -210,16 +238,46 @@ func (p *ROSClientPool) RunOnPool(cb func(rawClient RouterOSRawApiClient) (*rout
 	return cb(client)
 }
 
+func (p *ROSClientPool) RunOnPoolNoResp(cb func(rawClient RouterOSRawApiClient) error) error {
+	_, err := p.RunOnPool(func(rawClient RouterOSRawApiClient) (*routeros.Reply, error) {
+		return nil, cb(rawClient)
+	})
+	return err
+}
+
 type ROSWireguardRouterProvider struct {
-	config     *config.RouterOSProviderConfig
-	clientPool *ROSClientPool
+	name              string
+	config            *config.RouterOSProviderConfig
+	clientPool        *ROSClientPool
+	dnsResolutionCbs  []WireguardInterfaceResolutionFunc
+	dnsTicker         *time.Ticker
+	dnsTriggerChannel chan struct{}
+	lastCloudStatus   map[string]*WireguardInterface
 }
 
 func NewROSWireguardRouterProvider(
+	name string,
 	config *config.RouterOSProviderConfig,
 	clientFactory func(config *config.RouterOSProviderConfig) (RouterOSRawApiClient, error),
 ) *ROSWireguardRouterProvider {
-	return &ROSWireguardRouterProvider{config: config, clientPool: NewROSClientPool(config, clientFactory)}
+
+	provider := &ROSWireguardRouterProvider{
+		name:              name,
+		config:            config,
+		clientPool:        NewROSClientPool(config, clientFactory),
+		dnsResolutionCbs:  make([]WireguardInterfaceResolutionFunc, 0),
+		dnsTicker:         time.NewTicker(dnsResolutionPeriod),
+		dnsTriggerChannel: make(chan struct{}, 0),
+		lastCloudStatus:   make(map[string]*WireguardInterface, 0),
+	}
+	// Launch DNS resolution as a routine
+	go provider.dnsResolutionRoutine()
+	return provider
+}
+
+func (p *ROSWireguardRouterProvider) SubscribePublicDNSResolution(cb WireguardInterfaceResolutionFunc) {
+	p.dnsResolutionCbs = append(p.dnsResolutionCbs, cb)
+	p.dnsTriggerChannel <- struct{}{}
 }
 
 func (p *ROSWireguardRouterProvider) DeletePeer(publicKey string, _ *models.WireguardTunnelInfo) error {
@@ -238,7 +296,7 @@ func (p *ROSWireguardRouterProvider) GetInterfaceIp(name string) (net.IP, *net.I
 		return nil, nil, err
 	}
 	if len(reply.Re) != 1 {
-		return nil, nil, errors.New(fmt.Sprintf("cannot find interface %s", name))
+		return nil, nil, fmt.Errorf("cannot find interface %s", name)
 	}
 
 	var rosIpAddress RouterOSIpAddress
@@ -284,6 +342,108 @@ func (p *ROSWireguardRouterProvider) Close() {
 	for _, entry := range p.clientPool.clients {
 		p.clientPool.deleteEntry(entry)
 	}
+	p.dnsTicker.Stop()
+	close(p.dnsTriggerChannel)
+}
+
+func (p *ROSWireguardRouterProvider) dnsResolutionRoutine() {
+	for {
+		select {
+		case _, ok := <-p.dnsTicker.C:
+			if !ok {
+				logging.Logger.Debug("Exiting the dnsResolutionRoutine")
+				return
+			}
+		case _, ok := <-p.dnsTriggerChannel:
+			if !ok {
+				logging.Logger.Debug("Exiting the dnsResolutionRoutine")
+				return
+			}
+		}
+		p.clientPool.RunOnPoolNoResp(p.runResolveDns)
+	}
+}
+
+func (p *ROSWireguardRouterProvider) runResolveDns(client RouterOSRawApiClient) error {
+	// If not subscriptions just skip
+	if len(p.dnsResolutionCbs) == 0 {
+		return nil
+	}
+
+	ipCloud, err := getIpCloudData(client)
+	if err != nil {
+		logging.Logger.Error("runResolveDns failed to resolve IP Cloud data")
+		return err
+	}
+
+	if !ipCloud.DdnsEnabled {
+		logging.Logger.Debug("runResolveDns skipping cause provider has DDNS feature disabled")
+		return nil
+	}
+
+	for _, tun := range p.config.WireguardTunnels {
+		iface, err := getWireguardInterface(client, tun.Interface)
+		if err != nil {
+			logging.Logger.Debugw(
+				"runResolveDns error getting tunnel interface data",
+				"interface", tun.Interface,
+				"error", err.Error(),
+			)
+			continue
+		}
+
+		interfaceEndpoint := WireguardInterface{Endpoint: ipCloud.DnsName, Port: iface.ListenPort, PublicKey: iface.PublicKey, Name: iface.Name}
+		lastCloudStatusIface, found := p.lastCloudStatus[tun.Interface]
+		if found && *lastCloudStatusIface == interfaceEndpoint {
+			logging.Logger.Debugf("runResolveDns skipping cause there are no changes for %s interface", tun.Interface)
+			continue
+		}
+
+		p.lastCloudStatus[tun.Interface] = &interfaceEndpoint
+		for _, cb := range p.dnsResolutionCbs {
+			cb(p.name, interfaceEndpoint)
+		}
+
+	}
+	return nil
+}
+
+func getIpCloudData(client RouterOSRawApiClient) (*RouterOSIpCloud, error) {
+	const command string = "/ip/cloud/print"
+	reply, err := client.RunArgs(command)
+	if err != nil {
+		return nil, fmt.Errorf("getIpCloudData failed at running %s %s ", command, err.Error())
+	}
+
+	if len(reply.Re) != 1 {
+		return nil, errors.New("getIpCloudData failed with unexpected return value")
+	}
+
+	var rosIpCloud RouterOSIpCloud
+	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosIpCloud); err != nil {
+		return nil, errors.New("getIpCloudData failed to decode response data")
+	}
+
+	return &rosIpCloud, nil
+}
+
+func getWireguardInterface(client RouterOSRawApiClient, name string) (*RouterOSWireguardInterface, error) {
+	reply, err := client.RunArgs("/interface/wireguard/print", fmt.Sprintf("?name=%s", name))
+
+	if err != nil {
+		return nil, errors.New("getWireguardInterface failed at running ")
+	}
+
+	if len(reply.Re) != 1 {
+		return nil, errors.New("getWireguardInterface failed with unexpected return value")
+	}
+
+	var rosInterface RouterOSWireguardInterface
+	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosInterface); err != nil {
+		return nil, errors.New("getWireguardInterface failed to decode response data")
+	}
+
+	return &rosInterface, nil
 }
 
 func addPeerToInterface(

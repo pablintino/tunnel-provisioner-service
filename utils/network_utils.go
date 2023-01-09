@@ -1,8 +1,15 @@
 package utils
 
-import "net"
+import (
+	"encoding/json"
+	"net"
+)
 
-type IPSlash net.IPNet
+// IPnMask Original IPNet truncates the non-masked side in some operations cause this type is meant to be a network
+// address, not an IP with its network mask. No json encoding too.
+type IPnMask struct {
+	net.IPNet
+}
 
 func NetworkIpv4Addr(n net.IPNet) net.IP {
 	network := net.IPv4zero.To4()
@@ -65,4 +72,24 @@ func AlignNetMask(ip net.IP, mask net.IPMask) (net.IP, net.IPMask) {
 		return ip16, mask16
 	}
 	return ip, mask
+}
+
+func NewIPnMask(ip net.IP, mask net.IPMask) IPnMask {
+	aIp, aMask := AlignNetMask(ip, mask)
+	return IPnMask{net.IPNet{
+		IP:   aIp,
+		Mask: aMask,
+	}}
+}
+
+func (i IPnMask) ToNet() net.IPNet {
+	return net.IPNet{IP: i.IP.Mask(i.Mask), Mask: i.Mask}
+}
+
+func NewIPnMaskFromNet(network net.IPNet) IPnMask {
+	return NewIPnMask(network.IP, network.Mask)
+}
+
+func (i IPnMask) MarshalJSON() ([]byte, error) {
+	return json.Marshal(i.String())
 }

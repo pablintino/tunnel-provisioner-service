@@ -54,6 +54,11 @@ func (w WireguardPeerModel) String() string {
 		w.CreationTime, w.ProfileId, w.TunnelId)
 }
 
+type WireGuardAggregatedPeerModel struct {
+	WireguardPeerModel
+	Networks []net.IPNet
+}
+
 type IpPoolModel struct {
 	Id       primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	Provider string             `json:"provider,omitempty" bson:"provider"`
@@ -61,6 +66,15 @@ type IpPoolModel struct {
 	InUse    []net.IP           `json:"in-use,omitempty" bson:"in-use"`
 	Reserved []net.IP           `json:"reserved,omitempty" bson:"reserved"`
 	Network  net.IPNet          `json:"network,omitempty" bson:"network"`
+}
+
+type WireguardInterfaceModel struct {
+	Id        primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
+	Provider  string             `json:"provider,omitempty" bson:"provider"`
+	Interface string             `json:"tunnel,omitempty" bson:"tunnel"`
+	Dns       string             `json:"dns,omitempty" bson:"dns"`
+	PublicKey string             `json:"public-key,omitempty" bson:"public-key"`
+	Ip        net.IP             `json:"ip,omitempty" bson:"ip"`
 }
 
 type WireguardProfile struct {
