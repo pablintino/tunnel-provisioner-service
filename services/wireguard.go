@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"reflect"
+	"strings"
 	"time"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/logging"
@@ -28,11 +30,13 @@ type WireguardService interface {
 }
 
 type WireguardServiceImpl struct {
-	wireguardPeersRepository repositories.WireguardPeersRepository
-	poolService              PoolService
-	taskChannel              chan interface{}
-	tunnels                  map[string]models.WireguardTunnelInfo
-	providers                map[string]WireguardTunnelProvider
+	wireguardPeersRepository      repositories.WireguardPeersRepository
+	wireguardInterfacesRepository repositories.WireguardInterfacesRepository
+	poolService                   PoolService
+	taskChannel                   chan interface{}
+	tunnels                       map[string]models.WireguardTunnelInfo
+	providers                     map[string]WireguardTunnelProvider
+	interfaces                    map[string]map[string]models.WireguardInterfaceModel
 }
 
 type wireguardCreationTask struct {
@@ -46,30 +50,38 @@ type wireguardDeletionTask struct {
 	TunnelInfo *models.WireguardTunnelInfo
 }
 
+type wireguardDeleteInterfacePeersTask struct {
+	Provider  string
+	Interface string
+}
+
 func NewWireguardService(
 	wireguardPeersRepository repositories.WireguardPeersRepository,
+	wireguardInterfacesRepository repositories.WireguardInterfacesRepository,
 	config *config.ServiceConfig,
 	providers map[string]WireguardTunnelProvider,
 	poolService PoolService,
-) (*WireguardServiceImpl, error) {
+) *WireguardServiceImpl {
 
 	taskChannel := make(chan interface{}, wireguardAsyncRoutineChanSize)
 
 	wireguardService := &WireguardServiceImpl{
-		wireguardPeersRepository: wireguardPeersRepository,
-		poolService:              poolService,
-		taskChannel:              taskChannel,
-		tunnels:                  make(map[string]models.WireguardTunnelInfo),
-		providers:                providers,
+		wireguardPeersRepository:      wireguardPeersRepository,
+		wireguardInterfacesRepository: wireguardInterfacesRepository,
+		poolService:                   poolService,
+		taskChannel:                   taskChannel,
+		tunnels:                       make(map[string]models.WireguardTunnelInfo),
+		providers:                     providers,
+		interfaces:                    make(map[string]map[string]models.WireguardInterfaceModel),
 	}
 	wireguardService.buildTunnelInfo(config)
 	go wireguardService.wireguardAsyncRoutine()
 
 	for _, prov := range providers {
-		prov.SubscribePublicDNSResolution(wireguardService.onDdnsResolution)
+		prov.SubscribeTunnelInterfaceResolution(wireguardService.onTunnelInterfaceResolution)
 	}
 
-	return wireguardService, nil
+	return wireguardService
 }
 
 func (u *WireguardServiceImpl) Close() {
@@ -77,7 +89,7 @@ func (u *WireguardServiceImpl) Close() {
 }
 
 func (u *WireguardServiceImpl) ListPeers(username string) ([]*models.WireGuardAggregatedPeerModel, error) {
-	peerModels, err := u.wireguardPeersRepository.GetPeers(username)
+	peerModels, err := u.wireguardPeersRepository.GetPeersByUsername(username)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +119,7 @@ func (u *WireguardServiceImpl) GetPeer(username, id string) (*models.WireGuardAg
 }
 
 func (u *WireguardServiceImpl) DeletePeer(username, id string) error {
-	peer, err := u.wireguardPeersRepository.DeletePeer(username, id)
+	peer, err := u.wireguardPeersRepository.GetPeerById(username, id)
 	if err != nil {
 		return err
 	}
@@ -188,8 +200,75 @@ func (u *WireguardServiceImpl) GetProfileInfo(tunnelId, profileId string) *model
 	return nil
 }
 
-func (u *WireguardServiceImpl) onDdnsResolution(provider string, iface WireguardInterface) {
-	logging.Logger.Infow("onDdnsResolution", "iface", iface)
+func (u *WireguardServiceImpl) onTunnelInterfaceResolution(provider string, resolutionData []WireguardInterfaceResolutionData) {
+
+	// Replace or create the interfaces map of the provider
+	interfacesMap := make(map[string]models.WireguardInterfaceModel)
+	u.interfaces[provider] = interfacesMap
+
+	for _, ifaceResolutionData := range resolutionData {
+		newIface := models.WireguardInterfaceModel{
+			Name:      ifaceResolutionData.Name,
+			PublicKey: ifaceResolutionData.PublicKey,
+			Dns:       ifaceResolutionData.Dns,
+			Provider:  provider,
+			Port:      ifaceResolutionData.Port,
+		}
+		interfacesMap[ifaceResolutionData.Name] = newIface
+	}
+
+	u.processInterfaceChanges(provider, interfacesMap)
+}
+
+func (u *WireguardServiceImpl) processInterfaceChanges(provider string, updatedInterfaces map[string]models.WireguardInterfaceModel) {
+	providerInterfaces, err := u.wireguardInterfacesRepository.GetProviderInterfaces(provider)
+	if err != nil {
+		logging.Logger.Errorw(
+			"processInterfaceChanges failed to query db to retrieve wireguard interfaces",
+			"provider", provider,
+			"error", err.Error(),
+		)
+		return
+	}
+
+	for _, providerInterface := range providerInterfaces {
+		newIface, found := updatedInterfaces[providerInterface.Name]
+		if !found {
+			// Interface removed. Notify and delete its peers
+			// TODO
+
+			deletionTask := wireguardDeleteInterfacePeersTask{
+				Interface: providerInterface.Name,
+				Provider:  provider,
+			}
+			u.taskChannel <- deletionTask
+
+		} else if !reflect.DeepEqual(newIface, providerInterface) {
+			// Interface changed. Notify
+			// TODO
+		}
+	}
+
+	if len(providerInterfaces) != 0 {
+		if err := u.wireguardInterfacesRepository.RemoveAll(provider); err != nil {
+			logging.Logger.Errorw(
+				"processInterfaceChanges failed to drop interfaces of the given provider from database",
+				"provider", provider,
+				"error", err.Error(),
+			)
+		}
+	}
+
+	for _, iface := range updatedInterfaces {
+		if _, err := u.wireguardInterfacesRepository.Save(&iface); err != nil {
+			logging.Logger.Errorw(
+				"processInterfaceChanges failed to save interface info",
+				"provider", provider,
+				"error", err.Error(),
+				"iface", iface,
+			)
+		}
+	}
 }
 
 func (u *WireguardServiceImpl) wireguardAsyncRoutine() {
@@ -204,11 +283,56 @@ func (u *WireguardServiceImpl) wireguardAsyncRoutine() {
 			u.handleWireguardCreationTask(p)
 		case wireguardDeletionTask:
 			u.handleWireguardDeletionTask(p)
+		case wireguardDeleteInterfacePeersTask:
+			u.handleWireguardDeleteInterfacePeersTask(p)
 		default:
 			fmt.Printf("Type of p is %T. Value %v", p, p)
 		}
 
 	}
+}
+
+func (u *WireguardServiceImpl) handleWireguardDeleteInterfacePeersTask(task wireguardDeleteInterfacePeersTask) {
+
+	tunnelInfo := u.getTunnelInfoByInterfaceAndProvider(task.Interface, task.Provider)
+	if tunnelInfo == nil {
+		logging.Logger.Errorw(
+			"handleWireguardDeleteInterfacePeersTask task failed to acquire tunnel info",
+			"provider", task.Provider,
+			"interface", task.Interface,
+		)
+		return
+	}
+
+	provider, ok := u.providers[tunnelInfo.Provider]
+	if !ok {
+		logging.Logger.Errorw(
+			"handleWireguardDeleteInterfacePeersTask failed to acquire provider",
+			"provider", tunnelInfo.Provider,
+		)
+		return
+	}
+
+	tunnelPeers, err := u.wireguardPeersRepository.GetPeersByTunnelId(tunnelInfo.Id)
+	if err != nil {
+		logging.Logger.Errorw(
+			"handleWireguardDeleteInterfacePeersTask task failed to get peers for tunnel",
+			"provider", task.Provider,
+			"interface", task.Interface,
+			"tunnel", tunnelInfo,
+		)
+	}
+
+	u.deletePeerAndIp(tunnelInfo, provider, tunnelPeers...)
+	if err := u.poolService.DeletePool(tunnelInfo); err != nil {
+		logging.Logger.Errorw(
+			"handleWireguardDeleteInterfacePeersTask task failed to delete the associated IP-Pool",
+			"provider", task.Provider,
+			"interface", task.Interface,
+			"tunnel", tunnelInfo,
+		)
+	}
+
 }
 
 func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletionTask) {
@@ -222,27 +346,47 @@ func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletio
 			return
 		}
 
-		if !task.Peer.Ip.IsUnspecified() {
-			err := u.poolService.RemoveIp(task.TunnelInfo, task.Peer.Ip)
+		u.deletePeerAndIp(task.TunnelInfo, provider, &task.Peer)
+	}
+}
+
+func (u *WireguardServiceImpl) deletePeerAndIp(tunnelInfo *models.WireguardTunnelInfo, provider WireguardTunnelProvider, peers ...*models.WireguardPeerModel) {
+	var publicKeys []string
+	for _, peer := range peers {
+
+		if err := u.wireguardPeersRepository.DeletePeer(peer); err != nil {
+			logging.Logger.Errorw(
+				"deletePeerAndIp task failed to delete peer from db",
+				"provider", tunnelInfo.Provider,
+				"peer", peer,
+				"tunnel", tunnelInfo,
+			)
+		}
+
+		if !peer.Ip.IsUnspecified() {
+			err := u.poolService.RemoveIp(tunnelInfo, peer.Ip)
 			if err != nil {
 				// TODO This log need String methods properly implemented
 				logging.Logger.Errorw(
-					"handleWireguardDeletionTask task failed to delete peer ip from pool",
-					"provider", task.TunnelInfo.Provider,
-					"peer", task.Peer,
-					"tunnel", task.TunnelInfo,
-					"ip", task.Peer.Ip.String(),
+					"deletePeerAndIp task failed to delete peer ip from pool",
+					"provider", tunnelInfo.Provider,
+					"peer", peer,
+					"tunnel", tunnelInfo,
+					"ip", peer.Ip.String(),
 				)
 			}
 		}
-
-		if err := provider.DeletePeer(task.Peer.PublicKey, task.TunnelInfo); err != nil {
+		publicKeys = append(publicKeys, peer.PublicKey)
+	}
+	if len(publicKeys) != 0 {
+		if err := provider.DeletePeers(tunnelInfo, publicKeys...); err != nil {
 			// TODO This log need String methods properly implemented
 			logging.Logger.Errorw(
-				"wireguardCreationTask task failed to delete peer",
-				"provider", task.TunnelInfo.Provider,
-				"peer", task.Peer,
-				"tunnel", task.TunnelInfo,
+				"deletePeerAndIp task failed to delete peer",
+				"provider", tunnelInfo.Provider,
+				"keys", strings.Join(utils.MasqueradeSensitiveStringSlice(5, publicKeys...), ","),
+				"tunnel", tunnelInfo,
+				"error", err.Error(),
 			)
 		}
 	}
@@ -328,7 +472,14 @@ func (u *WireguardServiceImpl) buildAggregatedPeer(peer *models.WireguardPeerMod
 		return nil, fmt.Errorf("profile %s not for tunnel %s found", peer.TunnelId, peer.ProfileId)
 	}
 
-	return &models.WireGuardAggregatedPeerModel{WireguardPeerModel: *peer, Networks: profile.Ranges}, nil
+	model := &models.WireGuardAggregatedPeerModel{WireguardPeerModel: *peer, Networks: profile.Ranges}
+
+	if iface, found := u.interfaces[tunnel.Provider][tunnel.Interface]; found {
+		model.Endpoint = fmt.Sprintf("%s:%v", iface.Dns, iface.Port)
+		model.RemotePubKey = iface.PublicKey
+	}
+
+	return model, nil
 }
 
 func appendProfileRange(networkRange string, ranges []net.IPNet) []net.IPNet {
@@ -351,4 +502,13 @@ func (u *WireguardServiceImpl) getTunnelConfigById(tunnelId, profileId string) (
 		tunnel := u.tunnels[tunnelId]
 		return &tunnel, &profile
 	}
+}
+
+func (u *WireguardServiceImpl) getTunnelInfoByInterfaceAndProvider(interfaceName, provider string) *models.WireguardTunnelInfo {
+	for _, tunnel := range u.tunnels {
+		if tunnel.Provider == provider && tunnel.Interface == interfaceName {
+			return &tunnel
+		}
+	}
+	return nil
 }

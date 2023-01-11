@@ -3,7 +3,6 @@ package services
 import (
 	"fmt"
 	"net"
-	"strings"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/models"
 	"tunnel-provisioner-service/utils"
@@ -15,25 +14,26 @@ type WireguardPeerKeyPair struct {
 	PublicKey, PrivateKey string
 }
 
-type WireguardInterface struct {
+type WireguardInterfaceResolutionData struct {
 	Name      string
 	PublicKey string
-	Endpoint  string
+	Dns       string
 	Port      uint
 }
 
-func (w WireguardInterface) String() string {
-	return fmt.Sprintf("WireguardInterface[Name=%s, PublicKey=%s, Endpoint=%s, Port=%d]",
-		w.Name, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Endpoint, w.Port)
+func (w WireguardInterfaceResolutionData) String() string {
+	return fmt.Sprintf("WireguardInterface[Name=%s, PublicKey=%s, Dns=%s, Port=%d]",
+		w.Name, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Dns, w.Port)
 }
 
-type WireguardInterfaceResolutionFunc func(provider string, iface WireguardInterface)
+type WireguardInterfaceResolutionFunc func(provider string, resolutionData []WireguardInterfaceResolutionData)
 
 type WireguardTunnelProvider interface {
 	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo, peerAddress net.IP) (*WireguardPeerKeyPair, error)
 	DeletePeer(publicKey string, tunnelInfo *models.WireguardTunnelInfo) error
+	DeletePeers(tunnelInfo *models.WireguardTunnelInfo, publicKey ...string) error
 	GetInterfaceIp(name string) (net.IP, *net.IPNet, error)
-	SubscribePublicDNSResolution(cb WireguardInterfaceResolutionFunc)
+	SubscribeTunnelInterfaceResolution(cb WireguardInterfaceResolutionFunc)
 	Close()
 }
 
@@ -50,17 +50,6 @@ func CloseProviders(providersMap map[string]WireguardTunnelProvider) {
 	for _, provider := range providersMap {
 		provider.Close()
 	}
-}
-
-func sanitizePskPubKeyCommand(command string, toMaskValues ...string) string {
-	res := command
-
-	for _, toMask := range toMaskValues {
-		if len(toMaskValues) != 0 {
-			res = strings.ReplaceAll(command, toMask, "<masked>")
-		}
-	}
-	return res
 }
 
 func buildWireguardApiPair() (*WireguardPeerKeyPair, error) {

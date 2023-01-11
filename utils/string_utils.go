@@ -39,16 +39,35 @@ func MasqueradeSensitiveString(source string, showNDigits int) string {
 	return exposedString
 }
 
-func PointerToEmptyString(source *string) string{
+func MasqueradeSensitiveStringSlice(showNDigits int, sources ...string) []string {
+	var results []string
+	for _, source := range sources {
+		results = append(results, MasqueradeSensitiveString(source, showNDigits))
+	}
+	return results
+}
+
+func PointerToEmptyString(source *string) string {
 	if source == nil {
 		return ""
 	}
 	return *source
 }
 
-func StringToNilPointer(source string) *string{
-	if len(source) == 0{
+func StringToNilPointer(source string) *string {
+	if len(source) == 0 {
 		return nil
 	}
 	return &source
+}
+
+func SanitizeStringWithValues(command string, toMaskValues ...string) string {
+	res := command
+
+	for _, toMask := range toMaskValues {
+		if len(toMaskValues) != 0 {
+			res = strings.ReplaceAll(command, toMask, "<masked>")
+		}
+	}
+	return res
 }

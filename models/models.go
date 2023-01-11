@@ -47,7 +47,7 @@ type WireguardPeerModel struct {
 
 func (w WireguardPeerModel) String() string {
 
-	return fmt.Sprintf("WireguardPeerModel[Id=%s, Username=%s, PrivateKey=%s, PublicKey=%s, "+
+	return fmt.Sprintf("WireguardPeerModel[Id=%v, Username=%s, PrivateKey=%s, PublicKey=%s, "+
 		"PreSharedKey=<not-diplayed>, Description=%v, State=%s, ProvisionStatus=%v, CreationTime=%v, "+
 		"ProfileId=%s, TunnelId=%s]", w.Id, w.Username, utils.MasqueradeSensitiveString(w.PrivateKey, 5),
 		utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Description, w.State, w.ProvisionStatus,
@@ -56,7 +56,9 @@ func (w WireguardPeerModel) String() string {
 
 type WireGuardAggregatedPeerModel struct {
 	WireguardPeerModel
-	Networks []net.IPNet
+	Networks     []net.IPNet
+	Endpoint     string
+	RemotePubKey string
 }
 
 type IpPoolModel struct {
@@ -68,19 +70,23 @@ type IpPoolModel struct {
 	Network  net.IPNet          `json:"network,omitempty" bson:"network"`
 }
 
+func (w IpPoolModel) String() string {
+	return fmt.Sprintf("IpPoolModel[Id=%v, Provider=%s, Tunnel=%s, InUse=%v, Reserved=%v, Network=%v]",
+		w.Id, w.Provider, w.Tunnel, w.InUse, w.Reserved, w.Network)
+}
+
 type WireguardInterfaceModel struct {
 	Id        primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	Provider  string             `json:"provider,omitempty" bson:"provider"`
-	Interface string             `json:"tunnel,omitempty" bson:"tunnel"`
+	Name      string             `json:"name,omitempty" bson:"name"`
 	Dns       string             `json:"dns,omitempty" bson:"dns"`
 	PublicKey string             `json:"public-key,omitempty" bson:"public-key"`
-	Ip        net.IP             `json:"ip,omitempty" bson:"ip"`
+	Port      uint               `json:"port,omitempty" bson:"port"`
 }
 
-type WireguardProfile struct {
-	Id     primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
-	Name   string             `json:"name,omitempty" bson:"name,omitempty"`
-	Ranges []string           `json:"ranges,omitempty" bson:"ranges,omitempty"`
+func (w WireguardInterfaceModel) String() string {
+	return fmt.Sprintf("WireguardInterfaceModel[Id=%v, Name=%s, Provider=%s, Dns=%s, PublicKey=%s, Port=%d]",
+		w.Id, w.Name, w.Provider, w.Dns, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Port)
 }
 
 type WireguardTunnelProfileInfo struct {
@@ -89,10 +95,20 @@ type WireguardTunnelProfileInfo struct {
 	Ranges []net.IPNet
 }
 
+func (w WireguardTunnelProfileInfo) String() string {
+	return fmt.Sprintf("WireguardTunnelProfileInfo[Id=%s, Name=%s, Ranges=%v]", w.Id,
+		w.Name, w.Ranges)
+}
+
 type WireguardTunnelInfo struct {
 	Id        string
 	Name      string
 	Provider  string
 	Interface string
 	Profiles  map[string]WireguardTunnelProfileInfo
+}
+
+func (w WireguardTunnelInfo) String() string {
+	return fmt.Sprintf("WireguardTunnelInfo[Id=%s, Name=%s, Provider=%s, Interface=%s, Profiles=%v]", w.Id,
+		w.Name, w.Provider, w.Interface, w.Profiles)
 }

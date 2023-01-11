@@ -15,6 +15,7 @@ const (
 
 type IpPoolRepository interface {
 	GetPool(provider, tunnel string) (*models.IpPoolModel, error)
+	DeleteTunnelPool(provider, tunnel string) error
 	SavePool(ipPool *models.IpPoolModel) (*models.IpPoolModel, error)
 	UpdatePool(ipPool *models.IpPoolModel) (*models.IpPoolModel, error)
 }
@@ -40,6 +41,16 @@ func (r *IpPoolRepositoryImpl) GetPool(provider, tunnel string) (*models.IpPoolM
 		return nil, err
 	}
 	return &ipPool, nil
+}
+
+func (r *IpPoolRepositoryImpl) DeleteTunnelPool(provider, tunnel string) error {
+	result, err := r.ipPoolCollection.DeleteOne(context.TODO(), bson.M{"provider": provider, "tunnel": tunnel})
+	if err != nil {
+		return err
+	} else if result.DeletedCount == 0 {
+		return fmt.Errorf("IpPool for %s provider %s tunnel not found and not deleted", provider, tunnel)
+	}
+	return nil
 }
 
 func (r *IpPoolRepositoryImpl) SavePool(ipPool *models.IpPoolModel) (*models.IpPoolModel, error) {

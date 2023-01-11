@@ -20,12 +20,12 @@ func StringToIPnMaskHookFunc() mapstructure.DecodeHookFunc {
 		}
 
 		// Convert it by parsing
-		ip, net, err := net.ParseCIDR(data.(string))
+		ip, network, err := net.ParseCIDR(data.(string))
 		if err != nil {
 			return nil, err
 		}
 
-		return NewIPnMask(ip, net.Mask), nil
+		return NewIPnMask(ip, network.Mask), nil
 	}
 }
 

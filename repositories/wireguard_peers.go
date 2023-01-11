@@ -16,11 +16,12 @@ const (
 )
 
 type WireguardPeersRepository interface {
-	GetPeers(username string) ([]*models.WireguardPeerModel, error)
+	GetPeersByUsername(username string) ([]*models.WireguardPeerModel, error)
+	GetPeersByTunnelId(tunnelId string) ([]*models.WireguardPeerModel, error)
 	GetPeerById(username, id string) (*models.WireguardPeerModel, error)
 	SavePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error)
 	UpdatePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error)
-	DeletePeer(username, id string) (*models.WireguardPeerModel, error)
+	DeletePeer(peer *models.WireguardPeerModel) error
 }
 
 type WireguardPeersRepositoryImpl struct {
@@ -56,26 +57,12 @@ func (r *WireguardPeersRepositoryImpl) UpdatePeer(peer *models.WireguardPeerMode
 	return peer, nil
 }
 
-func (r *WireguardPeersRepositoryImpl) DeletePeer(username, id string) (*models.WireguardPeerModel, error) {
-	mongoId, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return nil, err
-	}
-
-	result := r.peersCollection.FindOneAndDelete(context.TODO(), bson.M{"_id": mongoId, "username": username})
-	if result.Err() == mongo.ErrNoDocuments {
-		return nil, result.Err()
-	} else if result.Err() != nil {
-		return nil, result.Err()
-	}
-	var wpm models.WireguardPeerModel
-	if err := result.Decode(&wpm); err != nil {
-		return nil, err
-	}
-	return &wpm, nil
+func (r *WireguardPeersRepositoryImpl) DeletePeer(peer *models.WireguardPeerModel) error {
+	_, err := r.peersCollection.DeleteOne(context.TODO(), bson.M{"_id": peer.Id})
+	return err
 }
 
-func (r *WireguardPeersRepositoryImpl) GetPeers(username string) ([]*models.WireguardPeerModel, error) {
+func (r *WireguardPeersRepositoryImpl) GetPeersByUsername(username string) ([]*models.WireguardPeerModel, error) {
 	cursor, err := r.peersCollection.Find(context.TODO(), bson.D{{Key: "username", Value: username}})
 	if err != nil {
 		logging.Logger.Errorw(
@@ -87,6 +74,25 @@ func (r *WireguardPeersRepositoryImpl) GetPeers(username string) ([]*models.Wire
 	}
 	defer cursor.Close(context.TODO())
 
+	return r.getModelsFromCursor(cursor)
+}
+
+func (r *WireguardPeersRepositoryImpl) GetPeersByTunnelId(tunnelId string) ([]*models.WireguardPeerModel, error) {
+	cursor, err := r.peersCollection.Find(context.TODO(), bson.D{{Key: "tunnel-id", Value: tunnelId}})
+	if err != nil {
+		logging.Logger.Errorw(
+			"Cannot run Wireguard list query",
+			"tunnelId", tunnelId,
+			"error", err,
+		)
+		return nil, err
+	}
+	defer cursor.Close(context.TODO())
+
+	return r.getModelsFromCursor(cursor)
+}
+
+func (r *WireguardPeersRepositoryImpl) getModelsFromCursor(cursor *mongo.Cursor) ([]*models.WireguardPeerModel, error) {
 	var result []*models.WireguardPeerModel
 	for cursor.Next(context.TODO()) {
 		var wpm models.WireguardPeerModel

@@ -108,14 +108,14 @@ func RouterOsRawApiClientFactory(config *config.RouterOSProviderConfig) (RouterO
 }
 
 func routerOsRawApiDecode(input, output interface{}) error {
-	config := &mapstructure.DecoderConfig{
+	configuration := &mapstructure.DecoderConfig{
 		Metadata:         nil,
 		Result:           output,
 		WeaklyTypedInput: true,
 		DecodeHook:       buildRosApiDecodeHook(),
 	}
 
-	decoder, err := mapstructure.NewDecoder(config)
+	decoder, err := mapstructure.NewDecoder(configuration)
 	if err != nil {
 		return err
 	}
@@ -206,15 +206,16 @@ func (p *ROSClientPool) getCreateClient() (RouterOSRawApiClient, error) {
 	return nil, nil
 }
 
-func (p *ROSClientPool) releaseClient(client RouterOSRawApiClient) error {
+func (p *ROSClientPool) releaseClient(client RouterOSRawApiClient) {
 	p.mutex.Lock()
 	defer p.mutex.Unlock()
 	for _, entry := range p.clients {
 		if entry.client == client {
 			entry.inUse = false
+			return
 		}
 	}
-	return errors.New("client to be released not found")
+	panic("client to be released not found")
 }
 
 func (p *ROSClientPool) deleteEntry(entry *ROSClientPoolEntry) {
@@ -252,7 +253,6 @@ type ROSWireguardRouterProvider struct {
 	dnsResolutionCbs  []WireguardInterfaceResolutionFunc
 	dnsTicker         *time.Ticker
 	dnsTriggerChannel chan struct{}
-	lastCloudStatus   map[string]*WireguardInterface
 }
 
 func NewROSWireguardRouterProvider(
@@ -268,14 +268,13 @@ func NewROSWireguardRouterProvider(
 		dnsResolutionCbs:  make([]WireguardInterfaceResolutionFunc, 0),
 		dnsTicker:         time.NewTicker(dnsResolutionPeriod),
 		dnsTriggerChannel: make(chan struct{}, 0),
-		lastCloudStatus:   make(map[string]*WireguardInterface, 0),
 	}
 	// Launch DNS resolution as a routine
 	go provider.dnsResolutionRoutine()
 	return provider
 }
 
-func (p *ROSWireguardRouterProvider) SubscribePublicDNSResolution(cb WireguardInterfaceResolutionFunc) {
+func (p *ROSWireguardRouterProvider) SubscribeTunnelInterfaceResolution(cb WireguardInterfaceResolutionFunc) {
 	p.dnsResolutionCbs = append(p.dnsResolutionCbs, cb)
 	p.dnsTriggerChannel <- struct{}{}
 }
@@ -285,6 +284,23 @@ func (p *ROSWireguardRouterProvider) DeletePeer(publicKey string, _ *models.Wire
 		return deletePeer(rawClient, publicKey)
 	})
 	return err
+}
+
+func (p *ROSWireguardRouterProvider) DeletePeers(_ *models.WireguardTunnelInfo, publicKey ...string) error {
+	return p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		var errs []string
+		for _, key := range publicKey {
+			_, err := deletePeer(rawClient, key)
+			if err != nil {
+				errs = append(errs, err.Error())
+			}
+		}
+
+		if len(errs) != 0 {
+			return errors.New(strings.Join(errs, ","))
+		}
+		return nil
+	})
 }
 
 func (p *ROSWireguardRouterProvider) GetInterfaceIp(name string) (net.IP, *net.IPNet, error) {
@@ -376,11 +392,7 @@ func (p *ROSWireguardRouterProvider) runResolveDns(client RouterOSRawApiClient) 
 		return err
 	}
 
-	if !ipCloud.DdnsEnabled {
-		logging.Logger.Debug("runResolveDns skipping cause provider has DDNS feature disabled")
-		return nil
-	}
-
+	interfaceResolutions := make([]WireguardInterfaceResolutionData, 0)
 	for _, tun := range p.config.WireguardTunnels {
 		iface, err := getWireguardInterface(client, tun.Interface)
 		if err != nil {
@@ -392,19 +404,20 @@ func (p *ROSWireguardRouterProvider) runResolveDns(client RouterOSRawApiClient) 
 			continue
 		}
 
-		interfaceEndpoint := WireguardInterface{Endpoint: ipCloud.DnsName, Port: iface.ListenPort, PublicKey: iface.PublicKey, Name: iface.Name}
-		lastCloudStatusIface, found := p.lastCloudStatus[tun.Interface]
-		if found && *lastCloudStatusIface == interfaceEndpoint {
-			logging.Logger.Debugf("runResolveDns skipping cause there are no changes for %s interface", tun.Interface)
-			continue
+		resolutionData := WireguardInterfaceResolutionData{
+			Dns:       ipCloud.DnsName,
+			Port:      iface.ListenPort,
+			PublicKey: iface.PublicKey,
+			Name:      iface.Name,
 		}
-
-		p.lastCloudStatus[tun.Interface] = &interfaceEndpoint
-		for _, cb := range p.dnsResolutionCbs {
-			cb(p.name, interfaceEndpoint)
-		}
+		interfaceResolutions = append(interfaceResolutions, resolutionData)
 
 	}
+
+	for _, cb := range p.dnsResolutionCbs {
+		cb(p.name, interfaceResolutions)
+	}
+
 	return nil
 }
 
@@ -475,7 +488,9 @@ func addPeerToInterface(
 	}
 	command = append(command, fmt.Sprintf("=allowed-address=%s", strings.Trim(networksString, ",")))
 
-	logging.Logger.Debugw("ROS add peer to be run", "command", sanitizePskPubKeyCommand(strings.Join(command, " "), psk, pubKey))
+	logging.Logger.Debugw("ROS add peer to be run",
+		"command", utils.SanitizeStringWithValues(strings.Join(command, " "), psk, pubKey),
+	)
 
 	return client.RunArgs(command...)
 }
@@ -488,7 +503,7 @@ func deletePeer(client RouterOSRawApiClient, pubKey string) (*routeros.Reply, er
 
 	logging.Logger.Debugw(
 		"ROS find by pubkey query to be run",
-		"command", sanitizePskPubKeyCommand(strings.Join(commandQuery, " "), pubKey),
+		"command", utils.SanitizeStringWithValues(strings.Join(commandQuery, " "), pubKey),
 	)
 
 	reply, err := client.RunArgs(commandQuery...)

@@ -18,11 +18,6 @@ func Register(echo *echo.Echo, usersService services.UsersService, wireguardServ
 		Claims:     &jwt.StandardClaims{},
 	})
 
-	registerWireguardHandlers(apiGroup, wireguardService, jwtMiddleware)
+	registerWireguardPeersHandler(apiGroup, wireguardService, jwtMiddleware)
 
-}
-
-func registerWireguardHandlers(apiGroup *echo.Group, wireguardService services.WireguardService, middleware ...echo.MiddlewareFunc) {
-	wgGroup := apiGroup.Group("/wireguard", middleware...)
-	registerPeersHandler(wgGroup, wireguardService)
 }

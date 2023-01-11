@@ -16,6 +16,8 @@ type WireguardPeerDto struct {
 	Description     *string         `json:"description,omitempty"`
 	State           string          `json:"state,omitempty" bson:"state,omitempty"`
 	ProvisionStatus *string         `json:"provision-status,omitempty"`
+	Endpoint        string          `json:"endpoint,omitempty"`
+	RemotePubKey    string          `json:"remote-pub-key,omitempty"`
 	Networks        []utils.IPnMask `json:"networks,omitempty"` // net.IPNet cannot be json serialized
 }
 
@@ -31,6 +33,8 @@ func ToWireguardPeerDto(model *models.WireGuardAggregatedPeerModel) *WireguardPe
 		State:           model.State.String(),
 		PeerIp:          model.Ip,
 		Networks:        nets,
+		RemotePubKey:    model.RemotePubKey,
+		Endpoint:        model.Endpoint,
 		PrivateKey:      utils.StringToNilPointer(model.PrivateKey),
 		PublicKey:       utils.StringToNilPointer(model.PublicKey),
 		PreSharedKey:    utils.StringToNilPointer(model.PreSharedKey),

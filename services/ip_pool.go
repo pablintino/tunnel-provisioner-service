@@ -12,6 +12,7 @@ import (
 type PoolService interface {
 	GetNextIp(tunnel *models.WireguardTunnelInfo) (net.IP, error)
 	RemoveIp(tunnel *models.WireguardTunnelInfo, ip net.IP) error
+	DeletePool(tunnel *models.WireguardTunnelInfo) error
 }
 
 type PoolServiceImpl struct {
@@ -22,6 +23,14 @@ type PoolServiceImpl struct {
 
 func NewPoolService(ipPoolRepository repositories.IpPoolRepository, providers map[string]WireguardTunnelProvider) *PoolServiceImpl {
 	return &PoolServiceImpl{ipPoolRepository: ipPoolRepository, providers: providers}
+}
+
+func (p *PoolServiceImpl) DeletePool(tunnel *models.WireguardTunnelInfo) error {
+	// Can only be accessed by one goroutine
+	p.ipMutex.Lock()
+	defer p.ipMutex.Unlock()
+	return p.ipPoolRepository.DeleteTunnelPool(tunnel.Provider, tunnel.Name)
+
 }
 
 func (p *PoolServiceImpl) RemoveIp(tunnel *models.WireguardTunnelInfo, ip net.IP) error {

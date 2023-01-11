@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -59,7 +58,6 @@ type ServiceConfig struct {
 }
 
 func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
-	tunnels := make(map[string]*WireguardTunnelConfiguration, 0)
 	for _, provider := range c.Providers.RouterOS {
 		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
 			profiles := make(map[string]*WireguardTunnelProfileConfiguration, 0)
@@ -67,33 +65,55 @@ func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
 				ranges := make([]net.IPNet, 0)
 
 				for _, ipRange := range profile.Ranges {
-					_, net, err := net.ParseCIDR(ipRange)
+					_, network, err := net.ParseCIDR(ipRange)
 					if err != nil {
-						return errors.New(fmt.Sprintf("Network range %s is invalid. %v", ipRange, err))
+						return fmt.Errorf("network range %s is invalid. %v", ipRange, err)
 					}
 					for _, existingRange := range ranges {
-						if existingRange.Contains(net.IP) || net.Contains(existingRange.IP) {
-							return errors.New(fmt.Sprintf("Network range %s overlaps %s", existingRange.String(), net.String()))
+						if existingRange.Contains(network.IP) || network.Contains(existingRange.IP) {
+							return fmt.Errorf("network range %v overlaps %v", existingRange, network)
 						}
 					}
-					ranges = append(ranges, *net)
+					ranges = append(ranges, *network)
 				}
 
 				if _, ok := profiles[profileName]; ok {
-					return errors.New(fmt.Sprintf("Profile %s is duplicated", tunnelName))
+					return fmt.Errorf("profile %s is duplicated", tunnelName)
 				}
 				profiles[profileName] = &profile
 			}
-			if _, ok := tunnels[tunnelName]; ok {
-				return errors.New(fmt.Sprintf("Tunnel %s is duplicated", tunnelName))
+		}
+	}
+	return nil
+}
+
+func (c *ServiceConfig) validateRouterOSProviderUniquenessConstraints() error {
+	tunnels := make(map[string]struct{}, 0)
+	for providerName, provider := range c.Providers.RouterOS {
+		tunnelIfaces := make(map[string]struct{}, 0)
+		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
+			if _, found := tunnels[tunnelName]; !found {
+				tunnels[tunnelName] = struct{}{}
+			} else {
+				return fmt.Errorf("tunnel %s already in use for %s provider", tunnelName, providerName)
 			}
-			tunnels[tunnelName] = &tunnelConfig
+			if _, found := tunnelIfaces[tunnelConfig.Interface]; !found {
+				tunnelIfaces[tunnelConfig.Interface] = struct{}{}
+			} else {
+				return fmt.Errorf("interface %s already in use for %s provider",
+					tunnelConfig.Interface, providerName)
+			}
 		}
 	}
 	return nil
 }
 
 func (c *ServiceConfig) Validate() error {
+	// Important: If new providers are added ensure tunnel name remains "unique" across all of them
+	err := c.validateRouterOSProviderUniquenessConstraints()
+	if err != nil {
+		return err
+	}
 	return c.validateRouterOSWireguardRanges()
 }
 

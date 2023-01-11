@@ -15,7 +15,7 @@ import (
 
 func main() {
 
-	echo := echo.New()
+	echoInstance := echo.New()
 
 	logging.Initialize(config.GetDebugMode())
 	defer logging.Release()
@@ -43,6 +43,7 @@ func main() {
 	usersRepository := repositories.NewLDAPUsersRepository(serviceConfig.LDAPConfiguration)
 	peersRepository := repositories.NewPeersRepository(db)
 	ipPoolRepository := repositories.NewIpPoolRepository(db)
+	wireguardInterfacesRepository := repositories.NewWireguardInterfacesRepository(db)
 
 	userService := services.NewUserService(usersRepository)
 
@@ -50,17 +51,14 @@ func main() {
 	defer services.CloseProviders(providers)
 
 	poolService := services.NewPoolService(ipPoolRepository, providers)
-	wireguardService, err := services.NewWireguardService(peersRepository, &serviceConfig, providers, poolService)
-	if err != nil {
-		logging.Logger.Errorw("Error configuring/connecting to MongoDB", "error", err)
-		return
-	}
+	wireguardService := services.NewWireguardService(peersRepository, wireguardInterfacesRepository, &serviceConfig, providers, poolService)
 
 	defer wireguardService.Close()
 
-	handlers.Register(echo, userService, wireguardService)
+	handlers.Register(echoInstance, userService, wireguardService)
 
-	if err := echo.Start(fmt.Sprintf(":%d", serviceConfig.ServicePort)); err != http.ErrServerClosed {
-		fmt.Println(err.Error())
+	if err := echoInstance.Start(fmt.Sprintf(":%d", serviceConfig.ServicePort)); err != http.ErrServerClosed {
+		logging.Logger.Errorw(
+			"echo failed to boot", "error", err.Error())
 	}
 }

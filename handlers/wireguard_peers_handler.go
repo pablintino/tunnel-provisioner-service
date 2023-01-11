@@ -9,30 +9,32 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-type peersHandler struct {
+type wireguardPeersHandler struct {
 	wireguardService services.WireguardService
 }
 
-func registerPeersHandler(group *echo.Group, wireguardService services.WireguardService) {
-	peersHandler := &peersHandler{
+func registerWireguardPeersHandler(group *echo.Group, wireguardService services.WireguardService, middleware ...echo.MiddlewareFunc) {
+	wgGroup := group.Group("/wireguard", middleware...)
+
+	peersHandler := &wireguardPeersHandler{
 		wireguardService: wireguardService,
 	}
 
 	// Register the handler
-	group.GET("/tunnels", peersHandler.getTunnelsListHandler)
-	group.GET("/tunnels/:id", peersHandler.getTunnelByIdHandler)
-	group.GET("/tunnels/:id/profiles", peersHandler.getTunnelProfilesListHandler)
-	group.GET("/tunnels/:tid/profiles/:pid", peersHandler.getTunnelProfileByIdHandler)
-	group.GET("/tunnels/:tid/profiles/:pid/peers", peersHandler.getTunnelProfilesListHandler)
-	group.POST("/tunnels/:tid/profiles/:pid/peers", peersHandler.postTunnelProfilesPeersHandler)
+	wgGroup.GET("/tunnels", peersHandler.getTunnelsListHandler)
+	wgGroup.GET("/tunnels/:id", peersHandler.getTunnelByIdHandler)
+	wgGroup.GET("/tunnels/:id/profiles", peersHandler.getTunnelProfilesListHandler)
+	wgGroup.GET("/tunnels/:tid/profiles/:pid", peersHandler.getTunnelProfileByIdHandler)
+	wgGroup.GET("/tunnels/:tid/profiles/:pid/peers", peersHandler.getTunnelProfilesListHandler)
+	wgGroup.POST("/tunnels/:tid/profiles/:pid/peers", peersHandler.postTunnelProfilesPeersHandler)
 
-	group.GET("/peers", peersHandler.getPeersListHandler)
-	group.GET("/peers/:id", peersHandler.getPeerByIdHandler)
-	group.DELETE("/peers/:id", peersHandler.peersDeleteHandler)
-	group.PUT("/peers/:id", peersHandler.peersPutHandler)
+	wgGroup.GET("/peers", peersHandler.getPeersListHandler)
+	wgGroup.GET("/peers/:id", peersHandler.getPeerByIdHandler)
+	wgGroup.DELETE("/peers/:id", peersHandler.peersDeleteHandler)
+	wgGroup.PUT("/peers/:id", peersHandler.peersPutHandler)
 }
 
-func (h *peersHandler) getPeersListHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) getPeersListHandler(c echo.Context) error {
 	peers, err := h.wireguardService.ListPeers(getUsernameFromContext(c))
 	if err != nil {
 		return err
@@ -45,7 +47,7 @@ func (h *peersHandler) getPeersListHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, results)
 }
 
-func (h *peersHandler) getTunnelProfilesListHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) getTunnelProfilesListHandler(c echo.Context) error {
 	tunnelInfo := h.wireguardService.GetTunnelInfo(c.Param("id"))
 	if tunnelInfo == nil {
 		return c.NoContent(http.StatusNotFound)
@@ -58,7 +60,7 @@ func (h *peersHandler) getTunnelProfilesListHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, results)
 }
 
-func (h *peersHandler) postTunnelProfilesPeersHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) postTunnelProfilesPeersHandler(c echo.Context) error {
 	var request dtos.WireguardPeerRequestDto
 	if err := c.Bind(&request); err != nil {
 		return err
@@ -78,12 +80,12 @@ func (h *peersHandler) postTunnelProfilesPeersHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, dtos.ToWireguardPeerDto(peer))
 }
 
-func (h *peersHandler) peersPutHandler(c echo.Context) error {
-
+func (h *wireguardPeersHandler) peersPutHandler(c echo.Context) error {
+	// TODO
 	return nil
 }
 
-func (h *peersHandler) getPeerByIdHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) getPeerByIdHandler(c echo.Context) error {
 
 	peer, err := h.wireguardService.GetPeer(getUsernameFromContext(c), c.Param("id"))
 	if err != nil {
@@ -95,7 +97,7 @@ func (h *peersHandler) getPeerByIdHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, dtos.ToWireguardPeerDto(peer))
 }
 
-func (h *peersHandler) peersDeleteHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) peersDeleteHandler(c echo.Context) error {
 
 	err := h.wireguardService.DeletePeer(getUsernameFromContext(c), c.Param("id"))
 	if err != nil {
@@ -105,7 +107,7 @@ func (h *peersHandler) peersDeleteHandler(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-func (h *peersHandler) getTunnelProfileByIdHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) getTunnelProfileByIdHandler(c echo.Context) error {
 	profileInfo := h.wireguardService.GetProfileInfo(c.Param("tid"), c.Param("pid"))
 	if profileInfo == nil {
 		return c.NoContent(http.StatusNotFound)
@@ -114,7 +116,7 @@ func (h *peersHandler) getTunnelProfileByIdHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelProfileDto(profileInfo))
 }
 
-func (h *peersHandler) getTunnelByIdHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) getTunnelByIdHandler(c echo.Context) error {
 	tunnelInfo := h.wireguardService.GetTunnelInfo(c.Param("id"))
 	if tunnelInfo == nil {
 		return c.NoContent(http.StatusNotFound)
@@ -122,7 +124,7 @@ func (h *peersHandler) getTunnelByIdHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelDto(tunnelInfo))
 }
 
-func (h *peersHandler) getTunnelsListHandler(c echo.Context) error {
+func (h *wireguardPeersHandler) getTunnelsListHandler(c echo.Context) error {
 	results := make([]dtos.WireguardTunnelDto, 0)
 	for _, tunnel := range h.wireguardService.GetTunnels() {
 		results = append(results, *dtos.ToWireguardTunnelDto(tunnel))
