@@ -16,9 +16,11 @@ import (
 
 const (
 	wireguardAsyncRoutineChanSize = 128
+	syncPeriod                    = 15 * time.Minute
 )
 
 type WireguardService interface {
+	BooteableService
 	ListPeers(username string) ([]*models.WireGuardAggregatedPeerModel, error)
 	CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireGuardAggregatedPeerModel, error)
 	DeletePeer(username, id string) error
@@ -37,6 +39,7 @@ type WireguardServiceImpl struct {
 	tunnels                       map[string]models.WireguardTunnelInfo
 	providers                     map[string]WireguardTunnelProvider
 	interfaces                    map[string]map[string]models.WireguardInterfaceModel
+	syncTimer                     *time.Ticker
 }
 
 type wireguardCreationTask struct {
@@ -50,7 +53,7 @@ type wireguardDeletionTask struct {
 	TunnelInfo *models.WireguardTunnelInfo
 }
 
-type wireguardDeleteInterfacePeersTask struct {
+type wireguardUnprovisionInterfacePeersTask struct {
 	Provider  string
 	Interface string
 }
@@ -75,7 +78,6 @@ func NewWireguardService(
 		interfaces:                    make(map[string]map[string]models.WireguardInterfaceModel),
 	}
 	wireguardService.buildTunnelInfo(config)
-	go wireguardService.wireguardAsyncRoutine()
 
 	for _, prov := range providers {
 		prov.SubscribeTunnelInterfaceResolution(wireguardService.onTunnelInterfaceResolution)
@@ -84,8 +86,20 @@ func NewWireguardService(
 	return wireguardService
 }
 
+func (u *WireguardServiceImpl) OnBoot() error {
+	u.handleWireguardSyncTask()
+	if u.syncTimer == nil {
+		u.syncTimer = time.NewTicker(syncPeriod)
+		go u.wireguardAsyncRoutine()
+	}
+	return nil
+}
+
 func (u *WireguardServiceImpl) Close() {
 	close(u.taskChannel)
+	if u.syncTimer != nil {
+		u.syncTimer.Stop()
+	}
 }
 
 func (u *WireguardServiceImpl) ListPeers(username string) ([]*models.WireGuardAggregatedPeerModel, error) {
@@ -152,14 +166,15 @@ func (u *WireguardServiceImpl) CreatePeer(username, tunnelId, profileId, descrip
 	}
 
 	peer := &models.WireguardPeerModel{
-		Username:     username,
-		Description:  description,
-		PreSharedKey: psk,
-		State:        models.ProvisionStateProvisioning,
-		ProfileId:    profileId,
-		TunnelId:     tunnelId,
-		Ip:           ip,
-		CreationTime: time.Now(),
+		Username:      username,
+		Description:   description,
+		PreSharedKey:  psk,
+		State:         models.ProvisionStateProvisioning,
+		ProfileId:     profileId,
+		TunnelId:      tunnelId,
+		Ip:            ip,
+		InterfaceName: tunnel.Interface,
+		CreationTime:  time.Now(),
 	}
 
 	peer, err = u.wireguardPeersRepository.SavePeer(peer)
@@ -210,9 +225,8 @@ func (u *WireguardServiceImpl) onTunnelInterfaceResolution(provider string, reso
 		newIface := models.WireguardInterfaceModel{
 			Name:      ifaceResolutionData.Name,
 			PublicKey: ifaceResolutionData.PublicKey,
-			Dns:       ifaceResolutionData.Dns,
+			Endpoint:  ifaceResolutionData.Endpoint,
 			Provider:  provider,
-			Port:      ifaceResolutionData.Port,
 		}
 		interfacesMap[ifaceResolutionData.Name] = newIface
 	}
@@ -234,15 +248,13 @@ func (u *WireguardServiceImpl) processInterfaceChanges(provider string, updatedI
 	for _, providerInterface := range providerInterfaces {
 		newIface, found := updatedInterfaces[providerInterface.Name]
 		if !found {
-			// Interface removed. Notify and delete its peers
+			// Interface removed. Notify and unprovision its peers
 			// TODO
-
-			deletionTask := wireguardDeleteInterfacePeersTask{
+			unprovisionTask := wireguardUnprovisionInterfacePeersTask{
 				Interface: providerInterface.Name,
 				Provider:  provider,
 			}
-			u.taskChannel <- deletionTask
-
+			u.taskChannel <- unprovisionTask
 		} else if !reflect.DeepEqual(newIface, providerInterface) {
 			// Interface changed. Notify
 			// TODO
@@ -272,32 +284,45 @@ func (u *WireguardServiceImpl) processInterfaceChanges(provider string, updatedI
 }
 
 func (u *WireguardServiceImpl) wireguardAsyncRoutine() {
+loop:
 	for {
-		p, ok := <-u.taskChannel
-		if !ok {
-			logging.Logger.Debug("Exiting the wireguardAsyncRoutine")
-			return
+		select {
+		case p, ok := <-u.taskChannel:
+			// Rest/Events side
+			if !ok {
+				break loop
+			}
+			switch p := p.(type) {
+			case wireguardCreationTask:
+				u.handleWireguardCreationTask(p)
+			case wireguardDeletionTask:
+				u.handleWireguardDeletionTask(p)
+			case wireguardUnprovisionInterfacePeersTask:
+				u.handleWireguardUnprovisionInterfacePeersTask(p)
+			default:
+				fmt.Printf("Type of p is %T. Value %v", p, p)
+			}
+		case _, ok := <-u.syncTimer.C:
+			// Sync task side
+			if !ok {
+				break loop
+			}
+			u.handleWireguardSyncTask()
 		}
-		switch p := p.(type) {
-		case wireguardCreationTask:
-			u.handleWireguardCreationTask(p)
-		case wireguardDeletionTask:
-			u.handleWireguardDeletionTask(p)
-		case wireguardDeleteInterfacePeersTask:
-			u.handleWireguardDeleteInterfacePeersTask(p)
-		default:
-			fmt.Printf("Type of p is %T. Value %v", p, p)
-		}
-
 	}
+
+	logging.Logger.Debug("Exiting the wireguardAsyncRoutine")
 }
 
-func (u *WireguardServiceImpl) handleWireguardDeleteInterfacePeersTask(task wireguardDeleteInterfacePeersTask) {
+func (u *WireguardServiceImpl) handleWireguardSyncTask() {
+	// TODO Sync task implementation
+}
 
+func (u *WireguardServiceImpl) handleWireguardUnprovisionInterfacePeersTask(task wireguardUnprovisionInterfacePeersTask) {
 	tunnelInfo := u.getTunnelInfoByInterfaceAndProvider(task.Interface, task.Provider)
 	if tunnelInfo == nil {
 		logging.Logger.Errorw(
-			"handleWireguardDeleteInterfacePeersTask task failed to acquire tunnel info",
+			"failed to acquire tunnel info",
 			"provider", task.Provider,
 			"interface", task.Interface,
 		)
@@ -307,7 +332,7 @@ func (u *WireguardServiceImpl) handleWireguardDeleteInterfacePeersTask(task wire
 	provider, ok := u.providers[tunnelInfo.Provider]
 	if !ok {
 		logging.Logger.Errorw(
-			"handleWireguardDeleteInterfacePeersTask failed to acquire provider",
+			"failed to acquire provider",
 			"provider", tunnelInfo.Provider,
 		)
 		return
@@ -316,80 +341,153 @@ func (u *WireguardServiceImpl) handleWireguardDeleteInterfacePeersTask(task wire
 	tunnelPeers, err := u.wireguardPeersRepository.GetPeersByTunnelId(tunnelInfo.Id)
 	if err != nil {
 		logging.Logger.Errorw(
-			"handleWireguardDeleteInterfacePeersTask task failed to get peers for tunnel",
+			"task failed to get peers for tunnel",
 			"provider", task.Provider,
 			"interface", task.Interface,
 			"tunnel", tunnelInfo,
 		)
 	}
 
-	u.deletePeerAndIp(tunnelInfo, provider, tunnelPeers...)
-	if err := u.poolService.DeletePool(tunnelInfo); err != nil {
-		logging.Logger.Errorw(
-			"handleWireguardDeleteInterfacePeersTask task failed to delete the associated IP-Pool",
-			"provider", task.Provider,
-			"interface", task.Interface,
-			"tunnel", tunnelInfo,
-		)
-	}
-
-}
-
-func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletionTask) {
-	if task.Peer.State == models.ProvisionStateProvisioned && len(task.Peer.PublicKey) != 0 {
-		provider, ok := u.providers[task.TunnelInfo.Provider]
-		if !ok {
-			logging.Logger.Errorw(
-				"handleWireguardDeletionTask task failed to acquire provider",
-				"provider", task.TunnelInfo.Provider,
-			)
-			return
-		}
-
-		u.deletePeerAndIp(task.TunnelInfo, provider, &task.Peer)
-	}
-}
-
-func (u *WireguardServiceImpl) deletePeerAndIp(tunnelInfo *models.WireguardTunnelInfo, provider WireguardTunnelProvider, peers ...*models.WireguardPeerModel) {
-	var publicKeys []string
-	for _, peer := range peers {
-
-		if err := u.wireguardPeersRepository.DeletePeer(peer); err != nil {
-			logging.Logger.Errorw(
-				"deletePeerAndIp task failed to delete peer from db",
-				"provider", tunnelInfo.Provider,
-				"peer", peer,
-				"tunnel", tunnelInfo,
-			)
-		}
-
-		if !peer.Ip.IsUnspecified() {
-			err := u.poolService.RemoveIp(tunnelInfo, peer.Ip)
-			if err != nil {
-				// TODO This log need String methods properly implemented
+	toUnprovisionPeers := make(map[string]*models.WireguardPeerModel, 0)
+	for _, peer := range tunnelPeers {
+		if peer.State == models.ProvisionStateProvisioned {
+			peer.State = models.ProvisionStateProvisioning
+			if _, err := u.wireguardPeersRepository.UpdatePeer(peer); err != nil {
 				logging.Logger.Errorw(
-					"deletePeerAndIp task failed to delete peer ip from pool",
-					"provider", tunnelInfo.Provider,
-					"peer", peer,
+					"failed to update peer UNPROVISIONING state for tunnel",
+					"provider", task.Provider,
+					"interface", task.Interface,
 					"tunnel", tunnelInfo,
-					"ip", peer.Ip.String(),
+				)
+			} else if len(peer.PublicKey) != 0 {
+				toUnprovisionPeers[peer.PublicKey] = peer
+			}
+		}
+	}
+
+	var toUnprovisionKeys []string
+	for key := range toUnprovisionPeers {
+		toUnprovisionKeys = append(toUnprovisionKeys, key)
+	}
+
+	if err := u.deletePeersFromProvider(tunnelInfo, provider, toUnprovisionKeys); err != nil {
+		// Flag peers as failed to unprovision
+		for _, peer := range toUnprovisionPeers {
+			peer.ProvisionStatus = err.Error()
+			if _, err := u.wireguardPeersRepository.UpdatePeer(peer); err != nil {
+				logging.Logger.Errorw(
+					"failed to update peer UNPROVISIONING status for tunnel",
+					"provider", task.Provider,
+					"interface", task.Interface,
+					"tunnel", tunnelInfo,
+					"error", err.Error(),
 				)
 			}
 		}
-		publicKeys = append(publicKeys, peer.PublicKey)
-	}
-	if len(publicKeys) != 0 {
-		if err := provider.DeletePeers(tunnelInfo, publicKeys...); err != nil {
-			// TODO This log need String methods properly implemented
-			logging.Logger.Errorw(
-				"deletePeerAndIp task failed to delete peer",
-				"provider", tunnelInfo.Provider,
-				"keys", strings.Join(utils.MasqueradeSensitiveStringSlice(5, publicKeys...), ","),
-				"tunnel", tunnelInfo,
-				"error", err.Error(),
-			)
+	} else {
+		// Succeed, flag in DB that they are unprovisioned
+		for _, peer := range toUnprovisionPeers {
+			peer.State = models.ProvisionStateUnprovisioned
+			if _, err := u.wireguardPeersRepository.UpdatePeer(peer); err != nil {
+				logging.Logger.Errorw(
+					"failed to update peer to UNPROVISIONED state for tunnel",
+					"provider", task.Provider,
+					"interface", task.Interface,
+					"tunnel", tunnelInfo,
+					"error", err.Error(),
+				)
+			}
 		}
 	}
+}
+
+func (u *WireguardServiceImpl) handleWireguardDeletionTask(task wireguardDeletionTask) {
+	provider, ok := u.providers[task.TunnelInfo.Provider]
+	if !ok {
+		logging.Logger.Errorw(
+			"handleWireguardDeletionTask task failed to acquire provider",
+			"provider", task.TunnelInfo.Provider,
+		)
+		return
+	}
+
+	task.Peer.State = models.ProvisionStateDeleting
+	peer, err := u.wireguardPeersRepository.UpdatePeer(&task.Peer)
+	if err != nil {
+		logging.Logger.Errorw(
+			"failed to set wireguard peer to DELETING state",
+			"provider", task.TunnelInfo.Provider,
+			"peer", task.Peer,
+		)
+		return
+	}
+
+	u.deletePeerAndIp(task.TunnelInfo, provider, peer)
+
+}
+
+func (u *WireguardServiceImpl) deletePeerAndIp(tunnelInfo *models.WireguardTunnelInfo, provider WireguardTunnelProvider, peers ...*models.WireguardPeerModel) error {
+	var publicKeys []string
+	for _, peer := range peers {
+		if len(peer.PublicKey) != 0 && peer.State != models.ProvisionStateError {
+			publicKeys = append(publicKeys, peer.PublicKey)
+		}
+	}
+
+	err := u.deletePeersFromProvider(tunnelInfo, provider, publicKeys)
+	if err != nil {
+		logging.Logger.Errorw(
+			"deletePeerAndIp failed to delete peers from provider",
+			"provider", tunnelInfo.Provider,
+			"keys", strings.Join(utils.MasqueradeSensitiveStringSlice(5, publicKeys...), ","),
+			"tunnel", tunnelInfo,
+		)
+	} else {
+		for _, peer := range peers {
+			err = u.wireguardPeersRepository.DeletePeer(peer)
+			if err != nil {
+				logging.Logger.Errorw(
+					"deletePeerAndIp failed to delete peer from db",
+					"provider", tunnelInfo.Provider,
+					"peer", peer,
+					"tunnel", tunnelInfo,
+				)
+			}
+
+			if !peer.Ip.IsUnspecified() {
+				err = u.poolService.RemoveIp(tunnelInfo, peer.Ip)
+				if err != nil {
+					logging.Logger.Errorw(
+						"deletePeerAndIp failed to delete peer ip from pool",
+						"provider", tunnelInfo.Provider,
+						"peer", peer,
+						"tunnel", tunnelInfo,
+						"ip", peer.Ip.String(),
+					)
+				}
+			}
+		}
+	}
+	return err
+}
+
+func (u *WireguardServiceImpl) deletePeersFromProvider(tunnelInfo *models.WireguardTunnelInfo, provider WireguardTunnelProvider, publicKeys []string) error {
+	if len(publicKeys) == 0 {
+		return nil
+	}
+
+	// This operation will try to remove all keys if they already exists
+	if _, err := provider.TryDeletePeers(tunnelInfo, publicKeys...); err != nil {
+		logging.Logger.Errorw(
+			"deletePeerAndIp task failed to delete peers",
+			"provider", tunnelInfo.Provider,
+			"keys", strings.Join(utils.MasqueradeSensitiveStringSlice(5, publicKeys...), ","),
+			"tunnel", tunnelInfo,
+			"error", err.Error(),
+		)
+		return err
+	}
+	return nil
 }
 
 func (u *WireguardServiceImpl) handleWireguardCreationTask(task wireguardCreationTask) {
@@ -461,7 +559,6 @@ func (u *WireguardServiceImpl) buildTunnelInfo(config *config.ServiceConfig) {
 				Interface: tunnelConfig.Interface,
 				Profiles:  profiles,
 			}
-
 		}
 	}
 }
@@ -475,7 +572,7 @@ func (u *WireguardServiceImpl) buildAggregatedPeer(peer *models.WireguardPeerMod
 	model := &models.WireGuardAggregatedPeerModel{WireguardPeerModel: *peer, Networks: profile.Ranges}
 
 	if iface, found := u.interfaces[tunnel.Provider][tunnel.Interface]; found {
-		model.Endpoint = fmt.Sprintf("%s:%v", iface.Dns, iface.Port)
+		model.Endpoint = iface.Endpoint
 		model.RemotePubKey = iface.PublicKey
 	}
 

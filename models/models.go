@@ -13,6 +13,9 @@ const (
 	ProvisionStateProvisioning = iota
 	ProvisionStateProvisioned
 	ProvisionStateError
+	ProvisionStateUnprovisioning
+	ProvisionStateUnprovisioned
+	ProvisionStateDeleting
 )
 
 type ProvisioningState int
@@ -25,6 +28,12 @@ func (e ProvisioningState) String() string {
 		return "PROVISIONED"
 	case ProvisionStateError:
 		return "ERROR"
+	case ProvisionStateUnprovisioned:
+		return "UNPROVISIONED"
+	case ProvisionStateUnprovisioning:
+		return "UNPROVISIONING"
+	case ProvisionStateDeleting:
+		return "DELETING"
 	default:
 		return fmt.Sprintf("%d", int(e))
 	}
@@ -42,6 +51,7 @@ type WireguardPeerModel struct {
 	CreationTime    time.Time          `json:"creation-time,omitempty" bson:"creation-time"`
 	ProfileId       string             `json:"profile-id,omitempty" bson:"profile-id"`
 	TunnelId        string             `json:"tunnel-id,omitempty" bson:"tunnel-id"`
+	InterfaceName   string             `json:"interface-name,omitempty" bson:"interface-name"`
 	Ip              net.IP             `json:"ip,omitempty" bson:"ip"`
 }
 
@@ -49,9 +59,10 @@ func (w WireguardPeerModel) String() string {
 
 	return fmt.Sprintf("WireguardPeerModel[Id=%v, Username=%s, PrivateKey=%s, PublicKey=%s, "+
 		"PreSharedKey=<not-diplayed>, Description=%v, State=%s, ProvisionStatus=%v, CreationTime=%v, "+
-		"ProfileId=%s, TunnelId=%s]", w.Id, w.Username, utils.MasqueradeSensitiveString(w.PrivateKey, 5),
+		"ProfileId=%s, TunnelId=%s, InterfaceName=%s]", w.Id, w.Username,
+		utils.MasqueradeSensitiveString(w.PrivateKey, 5),
 		utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Description, w.State, w.ProvisionStatus,
-		w.CreationTime, w.ProfileId, w.TunnelId)
+		w.CreationTime, w.ProfileId, w.TunnelId, w.InterfaceName)
 }
 
 type WireGuardAggregatedPeerModel struct {
@@ -79,14 +90,13 @@ type WireguardInterfaceModel struct {
 	Id        primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	Provider  string             `json:"provider,omitempty" bson:"provider"`
 	Name      string             `json:"name,omitempty" bson:"name"`
-	Dns       string             `json:"dns,omitempty" bson:"dns"`
+	Endpoint  string             `json:"endpoint,omitempty" bson:"dns"`
 	PublicKey string             `json:"public-key,omitempty" bson:"public-key"`
-	Port      uint               `json:"port,omitempty" bson:"port"`
 }
 
 func (w WireguardInterfaceModel) String() string {
-	return fmt.Sprintf("WireguardInterfaceModel[Id=%v, Name=%s, Provider=%s, Dns=%s, PublicKey=%s, Port=%d]",
-		w.Id, w.Name, w.Provider, w.Dns, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Port)
+	return fmt.Sprintf("WireguardInterfaceModel[Id=%v, Name=%s, Provider=%s, Endpoint=%s, PublicKey=%s]",
+		w.Id, w.Name, w.Provider, w.Endpoint, utils.MasqueradeSensitiveString(w.PublicKey, 5))
 }
 
 type WireguardTunnelProfileInfo struct {

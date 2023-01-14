@@ -21,6 +21,7 @@ type WireguardPeersRepository interface {
 	GetPeerById(username, id string) (*models.WireguardPeerModel, error)
 	SavePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error)
 	UpdatePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error)
+	GetTunnelsIds() ([]string, error)
 	DeletePeer(peer *models.WireguardPeerModel) error
 }
 
@@ -55,6 +56,18 @@ func (r *WireguardPeersRepositoryImpl) UpdatePeer(peer *models.WireguardPeerMode
 	}
 
 	return peer, nil
+}
+
+func (r *WireguardPeersRepositoryImpl) GetTunnelsIds() ([]string, error) {
+	res, err := r.peersCollection.Distinct(context.TODO(), "tunnel-id", bson.D{})
+	if err != nil {
+		return nil, err
+	}
+	results := make([]string, len(res))
+	for i, v := range res {
+		results[i] = v.(string)
+	}
+	return results, nil
 }
 
 func (r *WireguardPeersRepositoryImpl) DeletePeer(peer *models.WireguardPeerModel) error {

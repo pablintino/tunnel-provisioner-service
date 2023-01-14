@@ -17,21 +17,20 @@ type WireguardPeerKeyPair struct {
 type WireguardInterfaceResolutionData struct {
 	Name      string
 	PublicKey string
-	Dns       string
-	Port      uint
+	Endpoint  string
 }
 
 func (w WireguardInterfaceResolutionData) String() string {
-	return fmt.Sprintf("WireguardInterface[Name=%s, PublicKey=%s, Dns=%s, Port=%d]",
-		w.Name, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Dns, w.Port)
+	return fmt.Sprintf("WireguardInterface[Name=%s, PublicKey=%s, Endpoint=%s]",
+		w.Name, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Endpoint)
 }
 
 type WireguardInterfaceResolutionFunc func(provider string, resolutionData []WireguardInterfaceResolutionData)
 
 type WireguardTunnelProvider interface {
+	BooteableService
 	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo, peerAddress net.IP) (*WireguardPeerKeyPair, error)
-	DeletePeer(publicKey string, tunnelInfo *models.WireguardTunnelInfo) error
-	DeletePeers(tunnelInfo *models.WireguardTunnelInfo, publicKey ...string) error
+	TryDeletePeers(tunnelInfo *models.WireguardTunnelInfo, publicKey ...string) (uint, error)
 	GetInterfaceIp(name string) (net.IP, *net.IPNet, error)
 	SubscribeTunnelInterfaceResolution(cb WireguardInterfaceResolutionFunc)
 	Close()

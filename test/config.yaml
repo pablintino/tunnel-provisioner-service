@@ -12,7 +12,8 @@ ldap:
 providers:
   routeros:
     mk-test:
-      host: 10.10.80.1
+      host: routeros-dev1.internal.pablintino.net
+      tunnels-endpoint-interface: ether1
       port: 8728
       username: apitest
       password: test12345

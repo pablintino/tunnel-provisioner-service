@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 
@@ -33,11 +34,13 @@ type WireguardTunnelConfiguration struct {
 }
 
 type RouterOSProviderConfig struct {
-	Host             string                                  `koanf:"host"`
-	Port             int                                     `koanf:"port"`
-	Username         string                                  `koanf:"username"`
-	Password         string                                  `koanf:"password"`
-	WireguardTunnels map[string]WireguardTunnelConfiguration `koanf:"wg-tunnels"`
+	Host                    string                                  `koanf:"host"`
+	Port                    int                                     `koanf:"port"`
+	Username                string                                  `koanf:"username"`
+	Password                string                                  `koanf:"password"`
+	TunnelEndpoint          string                                  `koanf:"tunnels-endpoint"`
+	TunnelEndpointInterface string                                  `koanf:"tunnels-endpoint-interface"`
+	WireguardTunnels        map[string]WireguardTunnelConfiguration `koanf:"wg-tunnels"`
 }
 
 type ProvidersConfig struct {
@@ -86,6 +89,22 @@ func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
 	}
 	return nil
 }
+func (c *ServiceConfig) validateRouterOSProviderEndpoints() error {
+	for providerName, provider := range c.Providers.RouterOS {
+		if len(provider.TunnelEndpoint) != 0 && len(provider.TunnelEndpointInterface) != 0 {
+			return fmt.Errorf("one of tunnels-endpoint or tunnels-endpoint-interface can be provided in %s provider",
+				providerName)
+		}
+		if len(provider.TunnelEndpoint) != 0 {
+			parserdUrl, err := url.Parse(provider.TunnelEndpoint)
+			if err != nil || parserdUrl.OmitHost || len(parserdUrl.Port()) == 0 || len(parserdUrl.RawPath) != 0 {
+				return fmt.Errorf("invalid tunnel-endpoint %s in %s provider", provider.TunnelEndpoint,
+					providerName)
+			}
+		}
+	}
+	return nil
+}
 
 func (c *ServiceConfig) validateRouterOSProviderUniquenessConstraints() error {
 	tunnels := make(map[string]struct{}, 0)
@@ -111,6 +130,10 @@ func (c *ServiceConfig) validateRouterOSProviderUniquenessConstraints() error {
 func (c *ServiceConfig) Validate() error {
 	// Important: If new providers are added ensure tunnel name remains "unique" across all of them
 	err := c.validateRouterOSProviderUniquenessConstraints()
+	if err != nil {
+		return err
+	}
+	err = c.validateRouterOSProviderEndpoints()
 	if err != nil {
 		return err
 	}

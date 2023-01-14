@@ -12,7 +12,7 @@ import (
 
 var (
 	command  = flag.String("command", "/interface/wireguard/print", "RouterOS command")
-	address  = flag.String("address", "10.10.80.1:8728", "RouterOS address and port")
+	address  = flag.String("address", "routeros-dev1.internal.pablintino.net:8728", "RouterOS address and port")
 	username = flag.String("username", "apitest", "User name")
 	password = flag.String("password", "test12345", "Password")
 	async    = flag.Bool("async", false, "Use async code")
@@ -85,7 +85,7 @@ func main() {
 		c.Async()
 	}
 
-	command3 := "/interface/wireguard/print ?name=test-wg"
+	command3 := "/interface/wireguard/peers/remove =.id=*5,*6"
 	r3, err3 := c.RunArgs(strings.Split(command3, " "))
 	if err3 != nil {
 		log.Fatal(err3)

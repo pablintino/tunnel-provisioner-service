@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"net"
+	"strconv"
 )
 
 // IPnMask Original IPNet truncates the non-masked side in some operations cause this type is meant to be a network
@@ -92,4 +93,20 @@ func NewIPnMaskFromNet(network net.IPNet) IPnMask {
 
 func (i IPnMask) MarshalJSON() ([]byte, error) {
 	return json.Marshal(i.String())
+}
+
+func (i IPnMask) String() string {
+	var maskSize int
+	// Mask, in IPnMask is always 16 bytes as it is aligned in creation to 16 bytes
+	l, _ := i.Mask.Size()
+	if l == -1 {
+		return i.IP.String() + "/0"
+	} else if ipv4 := i.IP.To4(); ipv4 != nil {
+		// Is IPv4
+		maskSize = 32 - (128 - l)
+	} else {
+		maskSize = l
+	}
+
+	return i.IP.String() + "/" + strconv.FormatUint(uint64(maskSize), 10)
 }
