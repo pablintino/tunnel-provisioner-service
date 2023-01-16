@@ -8,7 +8,12 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 )
 
-func Register(echo *echo.Echo, usersService services.UsersService, wireguardService services.WireguardService) {
+func Register(
+	echo *echo.Echo,
+	usersService services.UsersService,
+	wireguardService services.WireguardPeersService,
+	tunnelService services.WireguardTunnelService,
+) {
 	apiGroup := echo.Group("/api/v1")
 
 	registerTokenHandler(apiGroup, usersService)
@@ -18,6 +23,6 @@ func Register(echo *echo.Echo, usersService services.UsersService, wireguardServ
 		Claims:     &jwt.StandardClaims{},
 	})
 
-	registerWireguardPeersHandler(apiGroup, wireguardService, jwtMiddleware)
+	registerWireguardPeersHandler(apiGroup, wireguardService, tunnelService, jwtMiddleware)
 
 }

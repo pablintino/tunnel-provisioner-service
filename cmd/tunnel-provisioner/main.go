@@ -45,21 +45,25 @@ func run() error {
 	wireguardInterfacesRepository := repositories.NewWireguardInterfacesRepository(db)
 
 	userService := services.NewUserService(usersRepository)
+	notificationService := services.NewNotificationService()
 
 	providers := services.BuilderProvidersMap(&serviceConfig)
 	defer services.CloseProviders(providers)
 
+	tunnelService := services.NewWireguardTunnelService(wireguardInterfacesRepository, &serviceConfig, providers, notificationService)
+
 	poolService := services.NewPoolService(ipPoolRepository, providers)
-	wireguardService := services.NewWireguardService(peersRepository, wireguardInterfacesRepository, &serviceConfig, providers, poolService)
+	wireguardService := services.NewWireguardPeersService(peersRepository, providers, poolService, tunnelService)
 
-	defer wireguardService.Close()
+	defer wireguardService.OnClose()
+	defer tunnelService.OnClose()
 
-	if err := onWireguardBoot(providers, wireguardService); err != nil {
+	if err := onWireguardBoot(tunnelService, wireguardService); err != nil {
 		logging.Logger.Errorw("error booting-up wireguard services", "error", err)
 		return err
 	}
 
-	handlers.Register(echoInstance, userService, wireguardService)
+	handlers.Register(echoInstance, userService, wireguardService, tunnelService)
 
 	if err := echoInstance.Start(fmt.Sprintf(":%d", serviceConfig.ServicePort)); err != http.ErrServerClosed {
 		logging.Logger.Errorw(
@@ -68,12 +72,9 @@ func run() error {
 	return nil
 }
 
-func onWireguardBoot(wireguardProviders map[string]services.WireguardTunnelProvider, wireguardService services.WireguardService) error {
-	// Start booting up from bottom (providers) to top (services)
-	for _, provider := range wireguardProviders {
-		if err := provider.OnBoot(); err != nil {
-			return err
-		}
+func onWireguardBoot(tunnelService services.WireguardTunnelService, wireguardService services.WireguardPeersService) error {
+	if err := tunnelService.OnBoot(); err != nil {
+		return err
 	}
 	return wireguardService.OnBoot()
 }

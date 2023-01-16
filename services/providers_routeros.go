@@ -21,7 +21,6 @@ const (
 	routerOsPoolSize           = 5
 	clientLifeTime             = 1 * time.Minute
 	routerOsApiDialTimeout     = 20 * time.Second
-	interfaceResolutionPeriod  = 1 * time.Hour
 )
 
 type RouterOSWireguardPeer struct {
@@ -250,7 +249,6 @@ type ROSWireguardRouterProvider struct {
 	name                     string
 	config                   *config.RouterOSProviderConfig
 	clientPool               *ROSClientPool
-	interfaceResolutionCbs   []WireguardInterfaceResolutionFunc
 	interfaceResolutionTimer *time.Ticker
 }
 
@@ -261,15 +259,10 @@ func NewROSWireguardRouterProvider(
 ) *ROSWireguardRouterProvider {
 
 	return &ROSWireguardRouterProvider{
-		name:                   name,
-		config:                 config,
-		clientPool:             NewROSClientPool(config, clientFactory),
-		interfaceResolutionCbs: make([]WireguardInterfaceResolutionFunc, 0),
+		name:       name,
+		config:     config,
+		clientPool: NewROSClientPool(config, clientFactory),
 	}
-}
-
-func (p *ROSWireguardRouterProvider) SubscribeTunnelInterfaceResolution(cb WireguardInterfaceResolutionFunc) {
-	p.interfaceResolutionCbs = append(p.interfaceResolutionCbs, cb)
 }
 
 func (p *ROSWireguardRouterProvider) TryDeletePeers(_ *models.WireguardTunnelInfo, publicKeys ...string) (uint, error) {
@@ -283,43 +276,31 @@ func (p *ROSWireguardRouterProvider) TryDeletePeers(_ *models.WireguardTunnelInf
 }
 
 func (p *ROSWireguardRouterProvider) GetInterfaceIp(name string) (net.IP, *net.IPNet, error) {
-	reply, err := p.clientPool.RunOnPool(func(rawClient RouterOSRawApiClient) (*routeros.Reply, error) {
-		return rawClient.RunArgs("/ip/address/print", fmt.Sprintf("?interface=%s", name))
+	var ipAddress *RouterOSIpAddress
+	var err error
+	err = p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		ipAddress, err = getInterfaceIpAddress(rawClient, name)
+		return err
 	})
-
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(reply.Re) != 1 {
-		return nil, nil, fmt.Errorf("cannot find interface %s", name)
-	}
 
-	var rosIpAddress RouterOSIpAddress
-	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosIpAddress); err != nil {
-		return nil, nil, err
-	}
-
-	netIp, netMask := utils.AlignNetMask(rosIpAddress.Network, rosIpAddress.Address.Mask)
-	return rosIpAddress.Address.IP, &net.IPNet{IP: netIp, Mask: netMask}, nil
+	netIp, netMask := utils.AlignNetMask(ipAddress.Network, ipAddress.Address.Mask)
+	return ipAddress.Address.IP, &net.IPNet{IP: netIp, Mask: netMask}, nil
 }
 
-func (p *ROSWireguardRouterProvider) OnBoot() error {
-	if err := p.clientPool.RunOnPoolNoResp(p.runInterfaceResolution); err != nil {
-		logging.Logger.Errorw(
-			"error running routeros interface resolution on boot",
-			"error", err.Error(),
-		)
+func (p *ROSWireguardRouterProvider) GetTunnelInterfaceInfo(interfaceName string) (*WireguardInterfaceInfo, error) {
+	var err error
+	var resolutionData *WireguardInterfaceInfo
+	if err = p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		resolutionData, err = p.getWireguardInterfaceResolutionData(rawClient, interfaceName)
 		return err
+	}); err != nil {
+		return nil, err
 	}
 
-	if p.interfaceResolutionTimer == nil {
-		p.interfaceResolutionTimer = time.NewTicker(interfaceResolutionPeriod)
-
-		// Launch DNS resolution as a routine
-		go p.routerOsInterfaceResolutionRoutine()
-	}
-
-	return nil
+	return resolutionData, nil
 }
 
 func (p *ROSWireguardRouterProvider) CreatePeer(
@@ -336,7 +317,7 @@ func (p *ROSWireguardRouterProvider) CreatePeer(
 		}
 
 		_, err = p.clientPool.RunOnPool(func(rawClient RouterOSRawApiClient) (*routeros.Reply, error) {
-			return addPeerToInterface(rawClient, tunnelInfo.Interface, kp.PublicKey, psk, description,
+			return addPeerToInterface(rawClient, tunnelInfo.Interface.Name, kp.PublicKey, psk, description,
 				profileInfo.Ranges, peerAddress)
 		})
 
@@ -352,75 +333,72 @@ func (p *ROSWireguardRouterProvider) CreatePeer(
 	return nil, fmt.Errorf("cannot create peer")
 }
 
-func (p *ROSWireguardRouterProvider) Close() {
+func (p *ROSWireguardRouterProvider) OnClose() error {
 	for _, entry := range p.clientPool.clients {
 		p.clientPool.deleteEntry(entry)
 	}
-	if p.interfaceResolutionCbs != nil {
-		p.interfaceResolutionTimer.Stop()
-	}
-}
-
-func (p *ROSWireguardRouterProvider) routerOsInterfaceResolutionRoutine() {
-	for {
-		select {
-		case _, ok := <-p.interfaceResolutionTimer.C:
-			if !ok {
-				logging.Logger.Debug("Exiting the routerOsInterfaceResolutionRoutine")
-				return
-			}
-		}
-		if err := p.clientPool.RunOnPoolNoResp(p.runInterfaceResolution); err != nil {
-			logging.Logger.Errorw(
-				"error running routeros interface resolution process",
-				"error", err.Error(),
-			)
-		}
-	}
-}
-
-func (p *ROSWireguardRouterProvider) runInterfaceResolution(client RouterOSRawApiClient) error {
-	// If no subscriptions just skip
-	if len(p.interfaceResolutionCbs) == 0 {
-		return nil
-	}
-
-	var endpointHost string
-
-	endpointHost, err := p.getTunnelInterfaceHost(client)
-	if err != nil {
-		return err
-	}
-
-	if len(endpointHost) == 0 {
-		return errors.New("runInterfaceResolution error getting tunnel interface host")
-	}
-
-	interfaceResolutions := make([]WireguardInterfaceResolutionData, 0)
-	for _, tun := range p.config.WireguardTunnels {
-		iface, err := getWireguardInterface(client, tun.Interface)
-		if err != nil {
-			logging.Logger.Errorw(
-				"error getting tunnel interface data",
-				"interface", tun.Interface,
-				"error", err.Error(),
-			)
-			continue
-		}
-
-		resolutionData := WireguardInterfaceResolutionData{
-			Endpoint:  fmt.Sprintf("%s:%d", endpointHost, iface.ListenPort),
-			PublicKey: iface.PublicKey,
-			Name:      iface.Name,
-		}
-		interfaceResolutions = append(interfaceResolutions, resolutionData)
-	}
-
-	for _, cb := range p.interfaceResolutionCbs {
-		cb(p.name, interfaceResolutions)
-	}
 
 	return nil
+}
+
+func getIpCloudData(client RouterOSRawApiClient) (*RouterOSIpCloud, error) {
+	const command string = "/ip/cloud/print"
+	reply, err := client.RunArgs(command)
+	if err != nil {
+		return nil, fmt.Errorf("getIpCloudData failed at running %s %s ", command, err.Error())
+	}
+
+	if len(reply.Re) != 1 {
+		return nil, errors.New("getIpCloudData failed with unexpected return value")
+	}
+
+	var rosIpCloud RouterOSIpCloud
+	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosIpCloud); err != nil {
+		return nil, errors.New("getIpCloudData failed to decode response data")
+	}
+
+	return &rosIpCloud, nil
+}
+
+func getWireguardInterface(client RouterOSRawApiClient, name string) (*RouterOSWireguardInterface, error) {
+	reply, err := client.RunArgs("/interface/wireguard/print", fmt.Sprintf("?name=%s", name))
+
+	if err != nil {
+		return nil, errors.New("getWireguardInterface failed at running ")
+	}
+
+	if len(reply.Re) != 1 {
+		return nil, ErrProviderInterfaceNotFound
+	}
+
+	var rosInterface RouterOSWireguardInterface
+	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosInterface); err != nil {
+		return nil, errors.New("getWireguardInterface failed to decode response data")
+	}
+
+	return &rosInterface, nil
+}
+
+func (p *ROSWireguardRouterProvider) getWireguardInterfaceResolutionData(rawClient RouterOSRawApiClient, interfaceName string) (*WireguardInterfaceInfo, error) {
+
+	wireguardInterface, err := getWireguardInterface(rawClient, interfaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	endpointHost, err := p.getTunnelInterfaceHost(rawClient)
+	if err != nil {
+		return nil, err
+	}
+
+	resolutionData := WireguardInterfaceInfo{
+		Endpoint:  fmt.Sprintf("%s:%d", endpointHost, wireguardInterface.ListenPort),
+		PublicKey: wireguardInterface.PublicKey,
+		Name:      wireguardInterface.Name,
+		Enabled:   !wireguardInterface.Disabled,
+	}
+
+	return &resolutionData, nil
 }
 
 func (p *ROSWireguardRouterProvider) getTunnelInterfaceHost(client RouterOSRawApiClient) (string, error) {
@@ -459,53 +437,32 @@ func (p *ROSWireguardRouterProvider) getTunnelInterfaceHost(client RouterOSRawAp
 	}
 }
 
-func getIpCloudData(client RouterOSRawApiClient) (*RouterOSIpCloud, error) {
-	const command string = "/ip/cloud/print"
-	reply, err := client.RunArgs(command)
-	if err != nil {
-		return nil, fmt.Errorf("getIpCloudData failed at running %s %s ", command, err.Error())
-	}
-
-	if len(reply.Re) != 1 {
-		return nil, errors.New("getIpCloudData failed with unexpected return value")
-	}
-
-	var rosIpCloud RouterOSIpCloud
-	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosIpCloud); err != nil {
-		return nil, errors.New("getIpCloudData failed to decode response data")
-	}
-
-	return &rosIpCloud, nil
-}
-
-func getWireguardInterface(client RouterOSRawApiClient, name string) (*RouterOSWireguardInterface, error) {
-	reply, err := client.RunArgs("/interface/wireguard/print", fmt.Sprintf("?name=%s", name))
+func getInterfaceIpAddress(client RouterOSRawApiClient, name string) (*RouterOSIpAddress, error) {
+	reply, err := client.RunArgs("/ip/address/print", fmt.Sprintf("?interface=%s", name))
 
 	if err != nil {
-		return nil, errors.New("getWireguardInterface failed at running ")
+		return nil, err
 	}
-
 	if len(reply.Re) != 1 {
-		return nil, errors.New("getWireguardInterface failed with unexpected return value")
+		return nil, ErrProviderInterfaceNotFound
 	}
 
-	var rosInterface RouterOSWireguardInterface
-	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosInterface); err != nil {
-		return nil, errors.New("getWireguardInterface failed to decode response data")
+	var rosIpAddress RouterOSIpAddress
+	if err := routerOsRawApiDecode(reply.Re[0].Map, &rosIpAddress); err != nil {
+		return nil, err
 	}
-
-	return &rosInterface, nil
+	return &rosIpAddress, nil
 }
 
 func addPeerToInterface(
 	client RouterOSRawApiClient,
-	iface, pubKey, psk, description string,
+	interfaceName, pubKey, psk, description string,
 	networks []net.IPNet,
 	peerAddress net.IP,
 ) (*routeros.Reply, error) {
 	command := []string{
 		"/interface/wireguard/peers/add",
-		fmt.Sprintf("=interface=%s", iface),
+		fmt.Sprintf("=interface=%s", interfaceName),
 		fmt.Sprintf("=public-key=%s", pubKey),
 	}
 

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"tunnel-provisioner-service/config"
@@ -14,26 +15,26 @@ type WireguardPeerKeyPair struct {
 	PublicKey, PrivateKey string
 }
 
-type WireguardInterfaceResolutionData struct {
+type WireguardInterfaceInfo struct {
 	Name      string
 	PublicKey string
 	Endpoint  string
+	Enabled   bool
 }
 
-func (w WireguardInterfaceResolutionData) String() string {
-	return fmt.Sprintf("WireguardInterface[Name=%s, PublicKey=%s, Endpoint=%s]",
-		w.Name, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Endpoint)
+func (w WireguardInterfaceInfo) String() string {
+	return fmt.Sprintf("WireguardInterface[Name=%s, PublicKey=%s, Endpoint=%s, Enabled=%v]",
+		w.Name, utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Endpoint, w.Enabled)
 }
 
-type WireguardInterfaceResolutionFunc func(provider string, resolutionData []WireguardInterfaceResolutionData)
+var ErrProviderInterfaceNotFound = errors.New("provider interface not found")
 
 type WireguardTunnelProvider interface {
-	BooteableService
+	DisposableService
 	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo, peerAddress net.IP) (*WireguardPeerKeyPair, error)
 	TryDeletePeers(tunnelInfo *models.WireguardTunnelInfo, publicKey ...string) (uint, error)
-	GetInterfaceIp(name string) (net.IP, *net.IPNet, error)
-	SubscribeTunnelInterfaceResolution(cb WireguardInterfaceResolutionFunc)
-	Close()
+	GetInterfaceIp(interfaceName string) (net.IP, *net.IPNet, error)
+	GetTunnelInterfaceInfo(interfaceName string) (*WireguardInterfaceInfo, error)
 }
 
 func BuilderProvidersMap(config *config.ServiceConfig) map[string]WireguardTunnelProvider {
@@ -47,7 +48,7 @@ func BuilderProvidersMap(config *config.ServiceConfig) map[string]WireguardTunne
 
 func CloseProviders(providersMap map[string]WireguardTunnelProvider) {
 	for _, provider := range providersMap {
-		provider.Close()
+		provider.OnClose()
 	}
 }
 

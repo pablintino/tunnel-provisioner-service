@@ -98,7 +98,7 @@ func (p *PoolServiceImpl) createIpPool(tunnel *models.WireguardTunnelInfo) (*mod
 		return nil, fmt.Errorf("cannot get pool ip cause cannot find %s provider", tunnel.Provider)
 	}
 
-	ip, network, err := provider.GetInterfaceIp(tunnel.Interface)
+	ip, network, err := provider.GetInterfaceIp(tunnel.Interface.Name)
 	if err != nil {
 		return nil, err
 	}

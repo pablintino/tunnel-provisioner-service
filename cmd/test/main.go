@@ -85,7 +85,7 @@ func main() {
 		c.Async()
 	}
 
-	command3 := "/interface/wireguard/peers/remove =.id=*5,*6"
+	command3 := "/interface/wireguard/print ?name=test"
 	r3, err3 := c.RunArgs(strings.Split(command3, " "))
 	if err3 != nil {
 		log.Fatal(err3)

@@ -51,7 +51,6 @@ type WireguardPeerModel struct {
 	CreationTime    time.Time          `json:"creation-time,omitempty" bson:"creation-time"`
 	ProfileId       string             `json:"profile-id,omitempty" bson:"profile-id"`
 	TunnelId        string             `json:"tunnel-id,omitempty" bson:"tunnel-id"`
-	InterfaceName   string             `json:"interface-name,omitempty" bson:"interface-name"`
 	Ip              net.IP             `json:"ip,omitempty" bson:"ip"`
 }
 
@@ -59,10 +58,10 @@ func (w WireguardPeerModel) String() string {
 
 	return fmt.Sprintf("WireguardPeerModel[Id=%v, Username=%s, PrivateKey=%s, PublicKey=%s, "+
 		"PreSharedKey=<not-diplayed>, Description=%v, State=%s, ProvisionStatus=%v, CreationTime=%v, "+
-		"ProfileId=%s, TunnelId=%s, InterfaceName=%s]", w.Id, w.Username,
+		"ProfileId=%s, TunnelId=%s]", w.Id, w.Username,
 		utils.MasqueradeSensitiveString(w.PrivateKey, 5),
 		utils.MasqueradeSensitiveString(w.PublicKey, 5), w.Description, w.State, w.ProvisionStatus,
-		w.CreationTime, w.ProfileId, w.TunnelId, w.InterfaceName)
+		w.CreationTime, w.ProfileId, w.TunnelId)
 }
 
 type WireGuardAggregatedPeerModel struct {
@@ -90,7 +89,7 @@ type WireguardInterfaceModel struct {
 	Id        primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
 	Provider  string             `json:"provider,omitempty" bson:"provider"`
 	Name      string             `json:"name,omitempty" bson:"name"`
-	Endpoint  string             `json:"endpoint,omitempty" bson:"dns"`
+	Endpoint  string             `json:"endpoint,omitempty" bson:"endpoint"`
 	PublicKey string             `json:"public-key,omitempty" bson:"public-key"`
 }
 
@@ -114,11 +113,11 @@ type WireguardTunnelInfo struct {
 	Id        string
 	Name      string
 	Provider  string
-	Interface string
+	Interface WireguardInterfaceModel
 	Profiles  map[string]WireguardTunnelProfileInfo
 }
 
 func (w WireguardTunnelInfo) String() string {
-	return fmt.Sprintf("WireguardTunnelInfo[Id=%s, Name=%s, Provider=%s, Interface=%s, Profiles=%v]", w.Id,
+	return fmt.Sprintf("WireguardTunnelInfo[Id=%s, Name=%s, Provider=%s, Interface=%v, Profiles=%v]", w.Id,
 		w.Name, w.Provider, w.Interface, w.Profiles)
 }

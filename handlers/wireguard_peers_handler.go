@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"tunnel-provisioner-service/dtos"
 	"tunnel-provisioner-service/services"
@@ -10,14 +11,21 @@ import (
 )
 
 type wireguardPeersHandler struct {
-	wireguardService services.WireguardService
+	wireguardService services.WireguardPeersService
+	tunnelService    services.WireguardTunnelService
 }
 
-func registerWireguardPeersHandler(group *echo.Group, wireguardService services.WireguardService, middleware ...echo.MiddlewareFunc) {
+func registerWireguardPeersHandler(
+	group *echo.Group,
+	wireguardService services.WireguardPeersService,
+	tunnelService services.WireguardTunnelService,
+	middleware ...echo.MiddlewareFunc,
+) {
 	wgGroup := group.Group("/wireguard", middleware...)
 
 	peersHandler := &wireguardPeersHandler{
 		wireguardService: wireguardService,
+		tunnelService:    tunnelService,
 	}
 
 	// Register the handler
@@ -48,9 +56,11 @@ func (h *wireguardPeersHandler) getPeersListHandler(c echo.Context) error {
 }
 
 func (h *wireguardPeersHandler) getTunnelProfilesListHandler(c echo.Context) error {
-	tunnelInfo := h.wireguardService.GetTunnelInfo(c.Param("id"))
-	if tunnelInfo == nil {
+	tunnelInfo, err := h.tunnelService.GetTunnelInfo(c.Param("id"))
+	if err != nil && errors.Is(err, services.ErrServiceNotFoundEntity) {
 		return c.NoContent(http.StatusNotFound)
+	} else if err != nil {
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	results := make([]dtos.WireguardTunnelProfileDto, 0)
@@ -108,26 +118,30 @@ func (h *wireguardPeersHandler) peersDeleteHandler(c echo.Context) error {
 }
 
 func (h *wireguardPeersHandler) getTunnelProfileByIdHandler(c echo.Context) error {
-	profileInfo := h.wireguardService.GetProfileInfo(c.Param("tid"), c.Param("pid"))
-	if profileInfo == nil {
+	profileInfo, err := h.tunnelService.GetProfileInfo(c.Param("tid"), c.Param("pid"))
+	if err != nil && errors.Is(err, services.ErrServiceNotFoundEntity) {
 		return c.NoContent(http.StatusNotFound)
+	} else if err != nil {
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelProfileDto(profileInfo))
+	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelProfileDto(&profileInfo))
 }
 
 func (h *wireguardPeersHandler) getTunnelByIdHandler(c echo.Context) error {
-	tunnelInfo := h.wireguardService.GetTunnelInfo(c.Param("id"))
-	if tunnelInfo == nil {
+	tunnelInfo, err := h.tunnelService.GetTunnelInfo(c.Param("id"))
+	if err != nil && errors.Is(err, services.ErrServiceNotFoundEntity) {
 		return c.NoContent(http.StatusNotFound)
+	} else if err != nil {
+		return c.NoContent(http.StatusInternalServerError)
 	}
-	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelDto(tunnelInfo))
+	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelDto(&tunnelInfo))
 }
 
 func (h *wireguardPeersHandler) getTunnelsListHandler(c echo.Context) error {
 	results := make([]dtos.WireguardTunnelDto, 0)
-	for _, tunnel := range h.wireguardService.GetTunnels() {
-		results = append(results, *dtos.ToWireguardTunnelDto(tunnel))
+	for _, tunnel := range h.tunnelService.GetTunnels() {
+		results = append(results, *dtos.ToWireguardTunnelDto(&tunnel))
 	}
 	return c.JSON(http.StatusOK, results)
 }
