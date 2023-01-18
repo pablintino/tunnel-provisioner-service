@@ -17,10 +17,12 @@ import (
 )
 
 const (
-	routerOsKeyCreationRetries = 3
-	routerOsPoolSize           = 5
-	clientLifeTime             = 1 * time.Minute
-	routerOsApiDialTimeout     = 20 * time.Second
+	routerOsPoolSize                = 5
+	clientLifeTime                  = 5 * time.Minute
+	routerOsApiDialTimeout          = 15 * time.Second
+	routerOsCommentPrefix           = "@@Tunnel Provisioner Managed"
+	routerOsResponseMessageExists   = "entry already exists"
+	routerOsResponseMessageNotFound = "no such item"
 )
 
 type RouterOSWireguardPeer struct {
@@ -36,6 +38,18 @@ type RouterOSWireguardPeer struct {
 	CurrentEndpointPort    int         `mapstructure:"current-endpoint-port"`
 	Rx                     int         `mapstructure:"rx"`
 	Disabled               bool        `mapstructure:"disabled"`
+}
+
+func (p *RouterOSWireguardPeer) toProviderPeer() *WireguardProviderPeer {
+	return &WireguardProviderPeer{
+		Id:             p.Id,
+		PublicKey:      p.PublicKey,
+		AllowedAddress: p.AllowedAddress,
+		Disabled:       p.Disabled,
+		Description:    strings.TrimLeft(strings.ReplaceAll(p.Comment, routerOsCommentPrefix, ""), ": "),
+		Rx:             p.Rx,
+		Tx:             p.Tx,
+	}
 }
 
 type RouterOSWireguardInterface struct {
@@ -245,6 +259,14 @@ func (p *ROSClientPool) RunOnPoolNoResp(cb func(rawClient RouterOSRawApiClient) 
 	return err
 }
 
+func (p *ROSClientPool) RunOnPoolIgnoreResp(cb func(rawClient RouterOSRawApiClient) (*routeros.Reply, error)) error {
+	_, err := p.RunOnPool(func(rawClient RouterOSRawApiClient) (*routeros.Reply, error) {
+		_, err := cb(rawClient)
+		return nil, err
+	})
+	return err
+}
+
 type ROSWireguardRouterProvider struct {
 	name                     string
 	config                   *config.RouterOSProviderConfig
@@ -265,22 +287,49 @@ func NewROSWireguardRouterProvider(
 	}
 }
 
-func (p *ROSWireguardRouterProvider) TryDeletePeers(_ *models.WireguardTunnelInfo, publicKeys ...string) (uint, error) {
-	var cnt uint
-	var err error
-	err = p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
-		cnt, err = tryDeletePeers(rawClient, publicKeys...)
+func (p *ROSWireguardRouterProvider) UpdatePeer(
+	id, pubKey, description, psk string,
+	tunnelInfo *models.WireguardTunnelInfo,
+	profileInfo *models.WireguardTunnelProfileInfo,
+	peerAddress net.IP,
+) error {
+	return p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		_, err := updatePeer(rawClient, id, tunnelInfo.Interface.Name, pubKey, psk, description, profileInfo.Ranges, peerAddress)
+		if err != nil && routerOSResourceAlreadyExistsError(routerOSRetrieveApiErrorMessage(err)) {
+			return ErrProviderPeerAlreadyExists
+		} else if err != nil && routerOSResourceNotFoundError(routerOSRetrieveApiErrorMessage(err)) {
+			return ErrProviderPeerNotFound
+		}
 		return err
+	})
+}
+
+func (p *ROSWireguardRouterProvider) TryDeletePeersByPublicKeys(_ *models.WireguardTunnelInfo, publicKeys ...string) (uint, error) {
+	var cnt uint
+	err := p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		var commandErr error
+		cnt, commandErr = tryDeletePeersByPublicKeys(rawClient, publicKeys...)
+		return commandErr
 	})
 	return cnt, err
 }
 
+func (p *ROSWireguardRouterProvider) GetPeers(tunnelInfo *models.WireguardTunnelInfo) ([]*WireguardProviderPeer, error) {
+	var peers []*WireguardProviderPeer
+	err := p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		var commandErr error
+		peers, commandErr = getPeers(rawClient, tunnelInfo)
+		return commandErr
+	})
+	return peers, err
+}
+
 func (p *ROSWireguardRouterProvider) GetInterfaceIp(name string) (net.IP, *net.IPNet, error) {
 	var ipAddress *RouterOSIpAddress
-	var err error
-	err = p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
-		ipAddress, err = getInterfaceIpAddress(rawClient, name)
-		return err
+	err := p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		var commandErr error
+		ipAddress, commandErr = getInterfaceIpAddress(rawClient, name)
+		return commandErr
 	})
 	if err != nil {
 		return nil, nil, err
@@ -291,46 +340,33 @@ func (p *ROSWireguardRouterProvider) GetInterfaceIp(name string) (net.IP, *net.I
 }
 
 func (p *ROSWireguardRouterProvider) GetTunnelInterfaceInfo(interfaceName string) (*WireguardInterfaceInfo, error) {
-	var err error
 	var resolutionData *WireguardInterfaceInfo
-	if err = p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
-		resolutionData, err = p.getWireguardInterfaceResolutionData(rawClient, interfaceName)
-		return err
-	}); err != nil {
-		return nil, err
-	}
+	err := p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		var commandErr error
+		resolutionData, commandErr = p.getWireguardInterfaceResolutionData(rawClient, interfaceName)
+		return commandErr
+	})
 
-	return resolutionData, nil
+	return resolutionData, err
 }
 
 func (p *ROSWireguardRouterProvider) CreatePeer(
-	description, psk string,
+	publicKey, description, psk string,
 	tunnelInfo *models.WireguardTunnelInfo,
 	profileInfo *models.WireguardTunnelProfileInfo,
-	peerAddress net.IP,
-) (*WireguardPeerKeyPair, error) {
-	for index := 0; index < routerOsKeyCreationRetries; index++ {
-
-		kp, err := buildWireguardApiPair()
-		if err != nil {
-			return nil, err
+	peerAddress net.IP) (*WireguardProviderPeer, error) {
+	var peer *WireguardProviderPeer
+	err := p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		var commandErr error
+		peer, commandErr = addPeerToInterface(rawClient, tunnelInfo.Interface.Name, publicKey, psk, description,
+			profileInfo.Ranges, peerAddress)
+		if commandErr != nil && routerOSResourceAlreadyExistsError(routerOSRetrieveApiErrorMessage(commandErr)) {
+			return ErrProviderPeerAlreadyExists
 		}
+		return commandErr
+	})
+	return peer, err
 
-		_, err = p.clientPool.RunOnPool(func(rawClient RouterOSRawApiClient) (*routeros.Reply, error) {
-			return addPeerToInterface(rawClient, tunnelInfo.Interface.Name, kp.PublicKey, psk, description,
-				profileInfo.Ranges, peerAddress)
-		})
-
-		if err != nil && routerOSResourceAlreadyExistsError(routerOSRetrieveApiErrorMessage(err)) {
-			// Key already exists
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		return kp, nil
-	}
-
-	return nil, fmt.Errorf("cannot create peer")
 }
 
 func (p *ROSWireguardRouterProvider) OnClose() error {
@@ -459,9 +495,54 @@ func addPeerToInterface(
 	interfaceName, pubKey, psk, description string,
 	networks []net.IPNet,
 	peerAddress net.IP,
-) (*routeros.Reply, error) {
+) (*WireguardProviderPeer, error) {
 	command := []string{
 		"/interface/wireguard/peers/add",
+	}
+
+	command = append(command,
+		buildCreateUpdatePeerCommandArguments(interfaceName, pubKey, psk, description, peerAddress, networks)...,
+	)
+
+	logging.Logger.Debugw("ROS add peer to be run",
+		"command", utils.SanitizeStringWithValues(strings.Join(command, " "), psk, pubKey),
+	)
+
+	reply, err := client.RunArgs(command...)
+	if err != nil {
+		return nil, err
+	}
+
+	retValue, err := routerOSGetReturnValue(reply)
+	if err != nil {
+		return nil, err
+	}
+
+	buildCreateResultNetworks(peerAddress, networks)
+
+	return &WireguardProviderPeer{
+		Id:             retValue,
+		Rx:             0,
+		Tx:             0,
+		PublicKey:      pubKey,
+		Description:    description,
+		Disabled:       false,
+		AllowedAddress: buildCreateResultNetworks(peerAddress, networks),
+	}, nil
+
+}
+
+func buildCreateResultNetworks(peerAddress net.IP, networks []net.IPNet) []net.IPNet {
+	var result []net.IPNet
+	_, network, err := net.ParseCIDR(fmt.Sprintf("%s/32", peerAddress.String()))
+	if err != nil {
+		result = append(networks, *network)
+	}
+	return append(result, networks...)
+}
+
+func buildCreateUpdatePeerCommandArguments(interfaceName, pubKey, psk, description string, peerAddress net.IP, networks []net.IPNet) []string {
+	command := []string{
 		fmt.Sprintf("=interface=%s", interfaceName),
 		fmt.Sprintf("=public-key=%s", pubKey),
 	}
@@ -470,9 +551,9 @@ func addPeerToInterface(
 		command = append(command, fmt.Sprintf("=preshared-key=%s", psk))
 	}
 
-	comment := "@@Tunnel Provisioner Managed"
+	comment := routerOsCommentPrefix
 	if len(description) != 0 {
-		comment = comment + ": " + comment
+		comment = comment + ": " + description
 	}
 
 	command = append(command, fmt.Sprintf("=comment=%s", comment))
@@ -482,19 +563,14 @@ func addPeerToInterface(
 		networksString = networksString + fmt.Sprintf(",%s", network.String())
 	}
 	command = append(command, fmt.Sprintf("=allowed-address=%s", strings.Trim(networksString, ",")))
-
-	logging.Logger.Debugw("ROS add peer to be run",
-		"command", utils.SanitizeStringWithValues(strings.Join(command, " "), psk, pubKey),
-	)
-
-	return client.RunArgs(command...)
+	return command
 }
 
-func tryDeletePeers(client RouterOSRawApiClient, pubKeys ...string) (uint, error) {
+func tryDeletePeersByPublicKeys(client RouterOSRawApiClient, pubKeys ...string) (uint, error) {
 	commandQuery := []string{"/interface/wireguard/peers/print"}
 
 	logging.Logger.Debugw(
-		"ROS find by pubkey query to be run",
+		"ROS tryDeletePeersByPublicKeys base query to be run",
 		"command", strings.Join(commandQuery, " "),
 	)
 
@@ -508,6 +584,7 @@ func tryDeletePeers(client RouterOSRawApiClient, pubKeys ...string) (uint, error
 		var peer RouterOSWireguardPeer
 		if err := routerOsRawApiDecode(re.Map, &peer); err != nil {
 			logging.Logger.Errorw("error decoding wireguard peer id to be removed")
+			return 0, err
 		} else if peer.Id == "" && len(peer.PublicKey) == 0 {
 			logging.Logger.Errorw("wireguard peer id to be mass removed is empty. Peer will be skipped")
 		} else {
@@ -541,6 +618,54 @@ func tryDeletePeers(client RouterOSRawApiClient, pubKeys ...string) (uint, error
 	return 0, err
 }
 
+func getPeers(client RouterOSRawApiClient, tunnelInfo *models.WireguardTunnelInfo) ([]*WireguardProviderPeer, error) {
+	commandQuery := []string{
+		"/interface/wireguard/peers/print",
+		fmt.Sprintf("?interface=%s", tunnelInfo.Interface.Name),
+	}
+
+	logging.Logger.Debugw(
+		"ROS getPeers base query to be run",
+		"command", strings.Join(commandQuery, " "),
+	)
+
+	reply, err := client.RunArgs(commandQuery...)
+	if err != nil {
+		return nil, err
+	}
+
+	var peers []*WireguardProviderPeer
+	for _, re := range reply.Re {
+		var peer RouterOSWireguardPeer
+		if err := routerOsRawApiDecode(re.Map, &peer); err != nil {
+			return nil, err
+		}
+		peers = append(peers, peer.toProviderPeer())
+	}
+	return peers, nil
+}
+
+func updatePeer(
+	client RouterOSRawApiClient,
+	id, interfaceName, pubKey, psk, description string,
+	networks []net.IPNet,
+	peerAddress net.IP,
+) (*routeros.Reply, error) {
+	updateCommand := []string{
+		"/interface/wireguard/peers/set",
+		fmt.Sprintf("=.id=%s", id),
+	}
+
+	updateCommand = append(updateCommand,
+		buildCreateUpdatePeerCommandArguments(interfaceName, pubKey, psk, description, peerAddress, networks)...,
+	)
+	logging.Logger.Debugw("ROS update peer to be run",
+		"command", utils.SanitizeStringWithValues(strings.Join(updateCommand, " "), psk, pubKey),
+	)
+
+	return client.RunArgs(updateCommand...)
+}
+
 func routerOSRetrieveApiErrorMessage(error error) string {
 	val, ok := error.(*routeros.DeviceError)
 	if ok {
@@ -552,5 +677,18 @@ func routerOSRetrieveApiErrorMessage(error error) string {
 }
 
 func routerOSResourceAlreadyExistsError(errorMsg string) bool {
-	return strings.Contains(errorMsg, "entry already exists")
+	return strings.Contains(strings.ToLower(errorMsg), routerOsResponseMessageExists)
+}
+
+func routerOSResourceNotFoundError(errorMsg string) bool {
+	return strings.Contains(strings.ToLower(errorMsg), routerOsResponseMessageNotFound)
+}
+
+func routerOSGetReturnValue(reply *routeros.Reply) (string, error) {
+	if reply.Done != nil && reply.Done.Word == "!done" {
+		if ret, found := reply.Done.Map["ret"]; found {
+			return ret, nil
+		}
+	}
+	return "", errors.New("cannot decode routerOS return value from reply")
 }

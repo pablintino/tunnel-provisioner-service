@@ -65,7 +65,7 @@ func SanitizeStringWithValues(command string, toMaskValues ...string) string {
 	res := command
 
 	for _, toMask := range toMaskValues {
-		if len(toMaskValues) != 0 {
+		if len(toMask) != 0 {
 			res = strings.ReplaceAll(command, toMask, "<masked>")
 		}
 	}

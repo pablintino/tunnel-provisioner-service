@@ -196,7 +196,13 @@ func (s *WireguardTunnelServiceImpl) loadAndCleanTunnelInterfaces() {
 			s.tunnels[interfaceTunnel.Id].Interface = *interfaceModel
 		} else {
 			// Cleanup unused interfaces
-			s.interfacesRepository.DeleteInterface(interfaceModel)
+			if err := s.interfacesRepository.DeleteInterface(interfaceModel); err != nil {
+				logging.Logger.Errorw(
+					"Error while deleting interface in DB",
+					"interface", interfaceModel,
+					"err", err.Error(),
+				)
+			}
 		}
 	}
 }

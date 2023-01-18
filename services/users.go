@@ -6,6 +6,7 @@ import (
 
 type UsersService interface {
 	Login(username, password string) error
+	GetUserList() ([]string, error)
 }
 
 type UserServiceImpl struct {
@@ -18,4 +19,8 @@ func NewUserService(usersRepository repositories.UsersRepository) *UserServiceIm
 
 func (u *UserServiceImpl) Login(username, password string) error {
 	return u.usersRepository.Authenticate(username, password)
+}
+
+func (u *UserServiceImpl) GetUserList() ([]string, error) {
+	return u.usersRepository.GetUserList()
 }

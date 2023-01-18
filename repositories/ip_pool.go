@@ -70,7 +70,7 @@ func (r *IpPoolRepositoryImpl) UpdatePool(ipPool *models.IpPoolModel) (*models.I
 	if err != nil {
 		return nil, err
 	}
-	if result.ModifiedCount != 1 {
+	if result.MatchedCount != 1 {
 		return nil, fmt.Errorf("update of IpPoolModel %s failed cause update count is %d", ipPool.Id.Hex(), result.ModifiedCount)
 	}
 

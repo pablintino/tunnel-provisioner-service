@@ -48,15 +48,26 @@ func run() error {
 	notificationService := services.NewNotificationService()
 
 	providers := services.BuilderProvidersMap(&serviceConfig)
-	defer services.CloseProviders(providers)
 
-	tunnelService := services.NewWireguardTunnelService(wireguardInterfacesRepository, &serviceConfig, providers, notificationService)
+	tunnelService := services.NewWireguardTunnelService(
+		wireguardInterfacesRepository,
+		&serviceConfig,
+		providers,
+		notificationService,
+	)
 
 	poolService := services.NewPoolService(ipPoolRepository, providers)
-	wireguardService := services.NewWireguardPeersService(peersRepository, providers, poolService, tunnelService)
+	wireguardService := services.NewWireguardPeersService(
+		peersRepository,
+		providers,
+		poolService,
+		tunnelService,
+		userService,
+	)
 
 	defer wireguardService.OnClose()
 	defer tunnelService.OnClose()
+	defer services.CloseProviders(providers)
 
 	if err := onWireguardBoot(tunnelService, wireguardService); err != nil {
 		logging.Logger.Errorw("error booting-up wireguard services", "error", err)

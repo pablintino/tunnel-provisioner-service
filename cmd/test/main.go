@@ -27,11 +27,11 @@ func dial() (*routeros.Client, error) {
 }
 
 type RouterOSWireguardPeer struct {
-	PublicKey              string      `mapstructure:"public-key""`
+	PublicKey              string      `mapstructure:"public-key"`
 	EndpointPort           int         `mapstructure:"endpoint-port"`
 	CurrentEndpointAddress string      `mapstructure:"current-endpoint-address"`
 	AllowedAddress         []net.IPNet `mapstructure:"allowed-address"`
-	Tx                     int         `mapstructure:"tx""`
+	Tx                     int         `mapstructure:"tx"`
 	Comment                string      `mapstructure:"comment"`
 	Id                     string      `mapstructure:".id"`
 	Interface              string      `mapstructure:"interface"`
@@ -85,7 +85,7 @@ func main() {
 		c.Async()
 	}
 
-	command3 := "/interface/wireguard/print ?name=test"
+	command3 := "/interface/wireguard/peers/print detail"
 	r3, err3 := c.RunArgs(strings.Split(command3, " "))
 	if err3 != nil {
 		log.Fatal(err3)

@@ -54,7 +54,7 @@ func (r *WireguardInterfacesRepositoryImpl) Update(
 		return nil, err
 	}
 
-	if result.ModifiedCount != 1 {
+	if result.MatchedCount != 1 {
 		return nil, fmt.Errorf("update of WireguardInterfaceModel %s failed cause update count is %d", interfaceModel.Id.Hex(), result.ModifiedCount)
 	}
 

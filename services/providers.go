@@ -7,12 +7,28 @@ import (
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/models"
 	"tunnel-provisioner-service/utils"
-
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 type WireguardPeerKeyPair struct {
 	PublicKey, PrivateKey string
+}
+
+type WireguardProviderPeer struct {
+	Id             string
+	PublicKey      string
+	PreSharedKey   string
+	AllowedAddress []net.IPNet
+	Description    string
+	Disabled       bool
+	Rx             int
+	Tx             int
+}
+
+func (w WireguardProviderPeer) String() string {
+	return fmt.Sprintf("WireguardProviderPeer[Id=%s, PublicKey=%s, PreSharedKey=%s,AllowedAddress=%s, Description=%s,"+
+		" Disabled=%v, Rx=%d, Tx=%d]", w.Id, utils.MasqueradeSensitiveString(w.PublicKey, 5),
+		utils.MasqueradeSensitiveString(w.PreSharedKey, 5), w.AllowedAddress, w.Description, w.Disabled,
+		w.Rx, w.Tx)
 }
 
 type WireguardInterfaceInfo struct {
@@ -28,11 +44,23 @@ func (w WireguardInterfaceInfo) String() string {
 }
 
 var ErrProviderInterfaceNotFound = errors.New("provider interface not found")
+var ErrProviderPeerNotFound = errors.New("provider peer not found")
+var ErrProviderPeerAlreadyExists = errors.New("provider peer already exists")
 
 type WireguardTunnelProvider interface {
 	DisposableService
-	CreatePeer(description, psk string, tunnelInfo *models.WireguardTunnelInfo, profileInfo *models.WireguardTunnelProfileInfo, peerAddress net.IP) (*WireguardPeerKeyPair, error)
-	TryDeletePeers(tunnelInfo *models.WireguardTunnelInfo, publicKey ...string) (uint, error)
+	CreatePeer(
+		publicKey, description, psk string,
+		tunnelInfo *models.WireguardTunnelInfo,
+		profileInfo *models.WireguardTunnelProfileInfo,
+		peerAddress net.IP,
+	) (*WireguardProviderPeer, error)
+	UpdatePeer(id, pubKey, description, psk string,
+		tunnelInfo *models.WireguardTunnelInfo,
+		profileInfo *models.WireguardTunnelProfileInfo,
+		peerAddress net.IP) error
+	GetPeers(tunnelInfo *models.WireguardTunnelInfo) ([]*WireguardProviderPeer, error)
+	TryDeletePeersByPublicKeys(tunnelInfo *models.WireguardTunnelInfo, publicKey ...string) (uint, error)
 	GetInterfaceIp(interfaceName string) (net.IP, *net.IPNet, error)
 	GetTunnelInterfaceInfo(interfaceName string) (*WireguardInterfaceInfo, error)
 }
@@ -50,15 +78,4 @@ func CloseProviders(providersMap map[string]WireguardTunnelProvider) {
 	for _, provider := range providersMap {
 		provider.OnClose()
 	}
-}
-
-func buildWireguardApiPair() (*WireguardPeerKeyPair, error) {
-	peerPrivateKey, err := wgtypes.GeneratePrivateKey()
-	if err != nil {
-		return nil, err
-	}
-	return &WireguardPeerKeyPair{
-		PublicKey:  peerPrivateKey.PublicKey().String(),
-		PrivateKey: peerPrivateKey.String(),
-	}, nil
 }
