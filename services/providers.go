@@ -59,8 +59,8 @@ type WireguardTunnelProvider interface {
 		tunnelInfo *models.WireguardTunnelInfo,
 		profileInfo *models.WireguardTunnelProfileInfo,
 		peerAddress net.IP) error
-	GetPeers(tunnelInfo *models.WireguardTunnelInfo) ([]*WireguardProviderPeer, error)
-	TryDeletePeersByPublicKeys(tunnelInfo *models.WireguardTunnelInfo, publicKey ...string) (uint, error)
+	GetPeerByPublicKey(publicKey string, tunnelInfo *models.WireguardTunnelInfo) (*WireguardProviderPeer, error)
+	DeletePeerByPublicKey(tunnelInfo *models.WireguardTunnelInfo, publicKey string) error
 	GetInterfaceIp(interfaceName string) (net.IP, *net.IPNet, error)
 	GetTunnelInterfaceInfo(interfaceName string) (*WireguardInterfaceInfo, error)
 }

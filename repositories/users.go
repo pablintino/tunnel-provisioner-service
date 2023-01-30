@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/go-ldap/ldap"
 	"tunnel-provisioner-service/config"
+	"tunnel-provisioner-service/models"
 )
 
 const (
@@ -11,7 +12,7 @@ const (
 )
 
 type UsersRepository interface {
-	GetUserList() ([]string, error)
+	GetUsers() (map[string]models.User, error)
 	Authenticate(username, password string) error
 }
 
@@ -24,7 +25,7 @@ func NewLDAPUsersRepository(ldapConfiguration config.LDAPConfiguration) *LDAPUse
 	return ldapProviderImpl
 }
 
-func (l *LDAPUsersRepository) GetUserList() ([]string, error) {
+func (l *LDAPUsersRepository) GetUsers() (map[string]models.User, error) {
 
 	connection, err := ldap.DialURL(l.config.LdapURL)
 	if err != nil {
@@ -94,13 +95,13 @@ func (l *LDAPUsersRepository) bind(conn *ldap.Conn) error {
 	}
 }
 
-func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) ([]string, error) {
+func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) (map[string]models.User, error) {
 	filter := ""
 	if l.config.UserFilter != nil {
 		filter = *l.config.UserFilter
 	}
 
-	userList := make([]string, 0)
+	users := make(map[string]models.User)
 	pagingControl := ldap.NewControlPaging(PageSize)
 
 	for {
@@ -122,8 +123,9 @@ func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) ([]string, error)
 
 		for _, entry := range response.Entries {
 			userId := entry.GetAttributeValue(l.config.UserAttribute)
+			email := entry.GetAttributeValue(l.config.EmailAttribute)
 			if userId != "" {
-				userList = append(userList, userId)
+				users[userId] = models.User{Email: email, Username: userId}
 			}
 		}
 
@@ -137,7 +139,7 @@ func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) ([]string, error)
 		break
 	}
 
-	return userList, nil
+	return users, nil
 }
 
 func (l *LDAPUsersRepository) buildUserSearchFilter(username string) string {

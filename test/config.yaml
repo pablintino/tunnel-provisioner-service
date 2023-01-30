@@ -8,6 +8,7 @@ ldap:
   bindPassword: 12345
   userFilter: (memberOf=CN=Test Group,OU=groups,DC=my-company,DC=com)
   userAttribute: uid
+  emailAttribute: mail
   userClass: inetOrgPerson
 providers:
   routeros:

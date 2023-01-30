@@ -1,7 +1,6 @@
 package services
 
 import (
-	"encoding/base64"
 	"errors"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
@@ -13,7 +12,7 @@ type BooteableService interface {
 }
 
 type DisposableService interface {
-	OnClose() error
+	OnClose()
 }
 
 func buildWireguardApiPair() (*WireguardPeerKeyPair, error) {
@@ -32,6 +31,6 @@ func checkWireguardPreSharedKeyIsValid(key string) bool {
 		return true
 	}
 
-	rawDecodedText, err := base64.StdEncoding.DecodeString(key)
-	return err != nil || len(rawDecodedText) == wgtypes.KeyLen
+	_, err := wgtypes.ParseKey(key)
+	return err == nil
 }

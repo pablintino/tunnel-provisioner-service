@@ -45,7 +45,6 @@ func run() error {
 	wireguardInterfacesRepository := repositories.NewWireguardInterfacesRepository(db)
 
 	userService := services.NewUserService(usersRepository)
-	notificationService := services.NewNotificationService()
 
 	providers := services.BuilderProvidersMap(&serviceConfig)
 
@@ -53,11 +52,10 @@ func run() error {
 		wireguardInterfacesRepository,
 		&serviceConfig,
 		providers,
-		notificationService,
 	)
 
 	poolService := services.NewPoolService(ipPoolRepository, providers)
-	wireguardService := services.NewWireguardPeersService(
+	peersService := services.NewWireguardPeersService(
 		peersRepository,
 		providers,
 		poolService,
@@ -65,16 +63,17 @@ func run() error {
 		userService,
 	)
 
-	defer wireguardService.OnClose()
-	defer tunnelService.OnClose()
+	syncService := services.NewWireguardSyncService(peersService, tunnelService, serviceConfig.SyncPeriod)
+
+	defer peersService.OnClose()
+	defer syncService.OnClose()
 	defer services.CloseProviders(providers)
 
-	if err := onWireguardBoot(tunnelService, wireguardService); err != nil {
+	if err := onWireguardBoot(tunnelService, syncService); err != nil {
 		logging.Logger.Errorw("error booting-up wireguard services", "error", err)
 		return err
 	}
-
-	handlers.Register(echoInstance, userService, wireguardService, tunnelService)
+	handlers.Register(echoInstance, userService, peersService, tunnelService)
 
 	if err := echoInstance.Start(fmt.Sprintf(":%d", serviceConfig.ServicePort)); err != http.ErrServerClosed {
 		logging.Logger.Errorw(
@@ -83,11 +82,11 @@ func run() error {
 	return nil
 }
 
-func onWireguardBoot(tunnelService services.WireguardTunnelService, wireguardService services.WireguardPeersService) error {
+func onWireguardBoot(tunnelService services.WireguardTunnelService, syncService services.WireguardSyncService) error {
 	if err := tunnelService.OnBoot(); err != nil {
 		return err
 	}
-	return wireguardService.OnBoot()
+	return syncService.OnBoot()
 }
 
 func main() {

@@ -304,24 +304,20 @@ func (p *ROSWireguardRouterProvider) UpdatePeer(
 	})
 }
 
-func (p *ROSWireguardRouterProvider) TryDeletePeersByPublicKeys(_ *models.WireguardTunnelInfo, publicKeys ...string) (uint, error) {
-	var cnt uint
-	err := p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
-		var commandErr error
-		cnt, commandErr = tryDeletePeersByPublicKeys(rawClient, publicKeys...)
-		return commandErr
+func (p *ROSWireguardRouterProvider) DeletePeerByPublicKey(tunnelInfo *models.WireguardTunnelInfo, publicKey string) error {
+	return p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
+		return deletePeersByPublicKeys(rawClient, publicKey, tunnelInfo)
 	})
-	return cnt, err
 }
 
-func (p *ROSWireguardRouterProvider) GetPeers(tunnelInfo *models.WireguardTunnelInfo) ([]*WireguardProviderPeer, error) {
-	var peers []*WireguardProviderPeer
+func (p *ROSWireguardRouterProvider) GetPeerByPublicKey(publicKey string, tunnelInfo *models.WireguardTunnelInfo) (*WireguardProviderPeer, error) {
+	var peer *WireguardProviderPeer
 	err := p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
 		var commandErr error
-		peers, commandErr = getPeers(rawClient, tunnelInfo)
+		peer, commandErr = getPeerByPublicKey(rawClient, publicKey, tunnelInfo)
 		return commandErr
 	})
-	return peers, err
+	return peer, err
 }
 
 func (p *ROSWireguardRouterProvider) GetInterfaceIp(name string) (net.IP, *net.IPNet, error) {
@@ -369,12 +365,10 @@ func (p *ROSWireguardRouterProvider) CreatePeer(
 
 }
 
-func (p *ROSWireguardRouterProvider) OnClose() error {
+func (p *ROSWireguardRouterProvider) OnClose() {
 	for _, entry := range p.clientPool.clients {
 		p.clientPool.deleteEntry(entry)
 	}
-
-	return nil
 }
 
 func getIpCloudData(client RouterOSRawApiClient) (*RouterOSIpCloud, error) {
@@ -566,67 +560,36 @@ func buildCreateUpdatePeerCommandArguments(interfaceName, pubKey, psk, descripti
 	return command
 }
 
-func tryDeletePeersByPublicKeys(client RouterOSRawApiClient, pubKeys ...string) (uint, error) {
-	commandQuery := []string{"/interface/wireguard/peers/print"}
+func deletePeersByPublicKeys(client RouterOSRawApiClient, publicKey string, tunnelInfo *models.WireguardTunnelInfo) error {
 
+	peer, err := getPeerByPublicKey(client, publicKey, tunnelInfo)
+	if err != nil {
+		return err
+	}
+
+	commandDelete := []string{
+		"/interface/wireguard/peers/remove",
+		fmt.Sprintf("=.id=%s", peer.Id),
+	}
 	logging.Logger.Debugw(
-		"ROS tryDeletePeersByPublicKeys base query to be run",
-		"command", strings.Join(commandQuery, " "),
+		"ROS delete to be run",
+		"command", utils.SanitizeStringWithValues(strings.Join(commandDelete, " "), publicKey),
 	)
 
-	reply, err := client.RunArgs(commandQuery...)
-	if err != nil {
-		return 0, err
-	}
-
-	remotePeerIds := make(map[string]string, 0)
-	for _, re := range reply.Re {
-		var peer RouterOSWireguardPeer
-		if err := routerOsRawApiDecode(re.Map, &peer); err != nil {
-			logging.Logger.Errorw("error decoding wireguard peer id to be removed")
-			return 0, err
-		} else if peer.Id == "" && len(peer.PublicKey) == 0 {
-			logging.Logger.Errorw("wireguard peer id to be mass removed is empty. Peer will be skipped")
-		} else {
-			remotePeerIds[peer.PublicKey] = peer.Id
-		}
-	}
-
-	var toDeletePeersIds []string
-	for _, toRemoveKey := range pubKeys {
-		if id, ok := remotePeerIds[toRemoveKey]; ok {
-			toDeletePeersIds = append(toDeletePeersIds, id)
-		}
-	}
-
-	if len(toDeletePeersIds) != 0 {
-		commandDelete := []string{
-			"/interface/wireguard/peers/remove",
-			fmt.Sprintf("=.id=%s", strings.Trim(strings.Join(toDeletePeersIds, ","), ",")),
-		}
-		logging.Logger.Debugw(
-			"ROS delete to be run",
-			"command", strings.Join(commandDelete, " "),
-		)
-
-		if _, err := client.RunArgs(commandDelete...); err != nil {
-			return 0, err
-		}
-		return uint(len(toDeletePeersIds)), nil
-	}
-
-	return 0, err
+	_, err = client.RunArgs(commandDelete...)
+	return err
 }
 
-func getPeers(client RouterOSRawApiClient, tunnelInfo *models.WireguardTunnelInfo) ([]*WireguardProviderPeer, error) {
+func getPeerByPublicKey(client RouterOSRawApiClient, publicKey string, tunnelInfo *models.WireguardTunnelInfo) (*WireguardProviderPeer, error) {
 	commandQuery := []string{
 		"/interface/wireguard/peers/print",
 		fmt.Sprintf("?interface=%s", tunnelInfo.Interface.Name),
+		fmt.Sprintf("?public-key=%s", publicKey),
 	}
 
 	logging.Logger.Debugw(
-		"ROS getPeers base query to be run",
-		"command", strings.Join(commandQuery, " "),
+		"ROS getPeerByPublicKey base query to be run",
+		"command", utils.SanitizeStringWithValues(strings.Join(commandQuery, " "), publicKey),
 	)
 
 	reply, err := client.RunArgs(commandQuery...)
@@ -634,15 +597,16 @@ func getPeers(client RouterOSRawApiClient, tunnelInfo *models.WireguardTunnelInf
 		return nil, err
 	}
 
-	var peers []*WireguardProviderPeer
-	for _, re := range reply.Re {
-		var peer RouterOSWireguardPeer
-		if err := routerOsRawApiDecode(re.Map, &peer); err != nil {
-			return nil, err
-		}
-		peers = append(peers, peer.toProviderPeer())
+	if len(reply.Re) != 1 {
+		return nil, ErrProviderPeerNotFound
 	}
-	return peers, nil
+
+	var peer RouterOSWireguardPeer
+	if err := routerOsRawApiDecode(reply.Re[0].Map, &peer); err != nil {
+		return nil, err
+	}
+
+	return peer.toProviderPeer(), nil
 }
 
 func updatePeer(

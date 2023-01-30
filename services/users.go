@@ -1,12 +1,13 @@
 package services
 
 import (
+	"tunnel-provisioner-service/models"
 	"tunnel-provisioner-service/repositories"
 )
 
 type UsersService interface {
 	Login(username, password string) error
-	GetUserList() ([]string, error)
+	GetUsers() (map[string]models.User, error)
 }
 
 type UserServiceImpl struct {
@@ -21,6 +22,6 @@ func (u *UserServiceImpl) Login(username, password string) error {
 	return u.usersRepository.Authenticate(username, password)
 }
 
-func (u *UserServiceImpl) GetUserList() ([]string, error) {
-	return u.usersRepository.GetUserList()
+func (u *UserServiceImpl) GetUsers() (map[string]models.User, error) {
+	return u.usersRepository.GetUsers()
 }

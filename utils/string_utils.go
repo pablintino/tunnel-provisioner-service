@@ -39,14 +39,6 @@ func MasqueradeSensitiveString(source string, showNDigits int) string {
 	return exposedString
 }
 
-func MasqueradeSensitiveStringSlice(showNDigits int, sources ...string) []string {
-	var results []string
-	for _, source := range sources {
-		results = append(results, MasqueradeSensitiveString(source, showNDigits))
-	}
-	return results
-}
-
 func PointerToEmptyString(source *string) string {
 	if source == nil {
 		return ""

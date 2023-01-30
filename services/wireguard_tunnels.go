@@ -5,7 +5,6 @@ import (
 	"errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"net"
-	"time"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/models"
@@ -13,43 +12,32 @@ import (
 	"tunnel-provisioner-service/utils"
 )
 
-const (
-	interfaceResolutionPeriod = 1 * time.Hour
-)
-
 type OnTunnelInterfaceDown func(tunnelInfo models.WireguardTunnelInfo, deleted bool)
 type OnTunnelConfigurationChange func(tunnelInfo models.WireguardTunnelInfo, keyChanged, endpointChanged bool)
 
 type WireguardTunnelService interface {
 	BooteableService
-	DisposableService
-	GetTunnels() []models.WireguardTunnelInfo
+	GetTunnels() map[string]models.WireguardTunnelInfo
 	GetTunnelInfo(tunnelId string) (models.WireguardTunnelInfo, error)
 	GetProfileInfo(tunnelId, profileId string) (models.WireguardTunnelProfileInfo, error)
 	GetTunnelConfigById(tunnelId, profileId string) (models.WireguardTunnelInfo, models.WireguardTunnelProfileInfo, error)
-	SetTunnelDownCallback(cb OnTunnelInterfaceDown)
-	SetTunnelConfigurationChangeCallback(cb OnTunnelConfigurationChange)
+	RefreshTunnelInterfacesInformation() error
 }
 
 type WireguardTunnelServiceImpl struct {
-	interfacesRepository     repositories.WireguardInterfacesRepository
-	tunnels                  map[string]*models.WireguardTunnelInfo
-	providers                map[string]WireguardTunnelProvider
-	config                   *config.ServiceConfig
-	interfaceResolutionTimer *time.Ticker
-	tunnelDownCallback       OnTunnelInterfaceDown
-	tunnelInfoChangeCallback OnTunnelConfigurationChange
-	notificationService      NotificationService
+	interfacesRepository repositories.WireguardInterfacesRepository
+	tunnels              map[string]*models.WireguardTunnelInfo
+	providers            map[string]WireguardTunnelProvider
+	config               *config.ServiceConfig
 }
 
 func NewWireguardTunnelService(interfacesRepository repositories.WireguardInterfacesRepository, config *config.ServiceConfig,
-	providers map[string]WireguardTunnelProvider, notificationService NotificationService) *WireguardTunnelServiceImpl {
+	providers map[string]WireguardTunnelProvider) *WireguardTunnelServiceImpl {
 	tunnelService := &WireguardTunnelServiceImpl{
 		interfacesRepository: interfacesRepository,
 		tunnels:              make(map[string]*models.WireguardTunnelInfo),
 		providers:            providers,
 		config:               config,
-		notificationService:  notificationService,
 	}
 
 	tunnelService.buildTunnelInfo(config)
@@ -57,43 +45,12 @@ func NewWireguardTunnelService(interfacesRepository repositories.WireguardInterf
 	return tunnelService
 }
 
-func (s *WireguardTunnelServiceImpl) SetTunnelDownCallback(cb OnTunnelInterfaceDown) {
-	s.tunnelDownCallback = cb
-}
-
-func (s *WireguardTunnelServiceImpl) SetTunnelConfigurationChangeCallback(cb OnTunnelConfigurationChange) {
-	s.tunnelInfoChangeCallback = cb
-}
-
-func (s *WireguardTunnelServiceImpl) GetTunnels() []models.WireguardTunnelInfo {
-	tunnels := make([]models.WireguardTunnelInfo, 0)
-	for _, v := range s.tunnels {
-		tunnels = append(tunnels, *v)
+func (s *WireguardTunnelServiceImpl) GetTunnels() map[string]models.WireguardTunnelInfo {
+	tunnels := make(map[string]models.WireguardTunnelInfo, 0)
+	for k, v := range s.tunnels {
+		tunnels[k] = *v
 	}
 	return tunnels
-}
-
-func (s *WireguardTunnelServiceImpl) OnClose() error {
-	if s.interfaceResolutionTimer != nil {
-		s.interfaceResolutionTimer.Stop()
-	}
-	return nil
-}
-
-func (s *WireguardTunnelServiceImpl) OnBoot() error {
-	// Load interfaces from DB at first
-	s.loadAndCleanTunnelInterfaces()
-
-	s.refreshTunnelInterfacesInformation()
-
-	if s.interfaceResolutionTimer == nil {
-		s.interfaceResolutionTimer = time.NewTicker(interfaceResolutionPeriod)
-
-		// Launch interface resolution as a routine
-		go s.refreshTunnelsInterfacesInformationRoutine()
-	}
-
-	return nil
 }
 
 func (s *WireguardTunnelServiceImpl) GetTunnelInfo(tunnelId string) (models.WireguardTunnelInfo, error) {
@@ -119,76 +76,74 @@ func (s *WireguardTunnelServiceImpl) GetTunnelConfigById(tunnelId, profileId str
 	}
 }
 
-func (s *WireguardTunnelServiceImpl) refreshTunnelInterfacesInformation() {
+func (s *WireguardTunnelServiceImpl) RefreshTunnelInterfacesInformation() error {
 	for _, tunnel := range s.tunnels {
 		interfaceResolutionData, err := s.providers[tunnel.Provider].GetTunnelInterfaceInfo(tunnel.Interface.Name)
-		deleted := err != nil && errors.Is(err, ErrProviderInterfaceNotFound)
-		if deleted || !interfaceResolutionData.Enabled {
-			// Interface miss-configured or deleted/disabled at provider, trigger unprovision
-			if s.tunnelDownCallback != nil {
-				s.tunnelDownCallback(*tunnel, deleted)
-			}
-		} else if err != nil {
-			logging.Logger.Errorw(
-				"Error retrieving tunnel resolution data",
-				"tunnel", tunnel.Name,
-				"interface", tunnel.Interface.Name,
-			)
+
+		if err != nil && !errors.Is(err, ErrProviderInterfaceNotFound) {
+			return err
 		}
 
-		if err == nil {
-
-			// If interface already exists and an actual change exists
-			if tunnel.Interface.Id != primitive.NilObjectID &&
-				(tunnel.Interface.PublicKey != interfaceResolutionData.PublicKey ||
-					tunnel.Interface.Endpoint != interfaceResolutionData.Endpoint) {
-
-				tunnel.Interface.PublicKey = interfaceResolutionData.PublicKey
-				tunnel.Interface.Endpoint = interfaceResolutionData.Endpoint
-
-				// Notify the other services about the change
-				if s.tunnelInfoChangeCallback != nil {
-					s.tunnelInfoChangeCallback(
-						*tunnel,
-						tunnel.Interface.PublicKey != interfaceResolutionData.PublicKey,
-						tunnel.Interface.Endpoint != interfaceResolutionData.Endpoint,
-					)
-				}
-
-				// Persist the change in DB
-				if _, err := s.interfacesRepository.Update(&tunnel.Interface); err != nil {
-					logging.Logger.Errorw(
-						"Error updating interface change in DB",
-						"provider", tunnel.Provider,
-						"interface", tunnel.Interface.Name,
-						"err", err.Error(),
-					)
-				}
-			} else if tunnel.Interface.Id == primitive.NilObjectID {
-				// New iface....
-				tunnel.Interface.PublicKey = interfaceResolutionData.PublicKey
-				tunnel.Interface.Endpoint = interfaceResolutionData.Endpoint
-				if _, err := s.interfacesRepository.Save(&tunnel.Interface); err != nil {
-					logging.Logger.Errorw(
-						"Error persisting a new interface in DB",
-						"provider", tunnel.Provider,
-						"interface", tunnel.Interface.Name,
-						"err", err.Error(),
-					)
-				}
+		interfaceChanged := s.fillInterfaceFromRemote(interfaceResolutionData, tunnel)
+		// If interface already exists and an actual change exists
+		if tunnel.Interface.Id != primitive.NilObjectID && interfaceChanged {
+			// Persist the change in DB
+			if _, err := s.interfacesRepository.Update(&tunnel.Interface); err != nil {
+				logging.Logger.Errorw(
+					"Error updating interface change in DB",
+					"provider", tunnel.Provider,
+					"interface", tunnel.Interface.Name,
+					"err", err.Error(),
+				)
+				return err
+			}
+		} else if tunnel.Interface.Id == primitive.NilObjectID {
+			// New iface....
+			if _, err := s.interfacesRepository.Save(&tunnel.Interface); err != nil {
+				logging.Logger.Errorw(
+					"Error persisting a new interface in DB",
+					"provider", tunnel.Provider,
+					"interface", tunnel.Interface.Name,
+					"err", err.Error(),
+				)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
-func (s *WireguardTunnelServiceImpl) loadAndCleanTunnelInterfaces() {
+func (s *WireguardTunnelServiceImpl) fillInterfaceFromRemote(interfaceResolutionData *WireguardInterfaceInfo, tunnel *models.WireguardTunnelInfo) bool {
+	interfacePresent := interfaceResolutionData != nil && interfaceResolutionData.Enabled
+	interfaceChanged :=
+		// Interface status changed
+		(tunnel.Interface.Present != interfacePresent) ||
+			// Interface status stills match but endpoint and key may have changed
+			(interfacePresent &&
+				(tunnel.Interface.PublicKey != interfaceResolutionData.PublicKey ||
+					tunnel.Interface.Endpoint != interfaceResolutionData.Endpoint || !tunnel.Interface.Present))
+
+	if interfaceChanged {
+		if interfacePresent {
+			tunnel.Interface.PublicKey = interfaceResolutionData.PublicKey
+			tunnel.Interface.Endpoint = interfaceResolutionData.Endpoint
+		} else {
+			tunnel.Interface.PublicKey = ""
+			tunnel.Interface.Endpoint = ""
+		}
+		tunnel.Interface.Present = interfacePresent
+	}
+	return interfaceChanged
+}
+
+func (s *WireguardTunnelServiceImpl) OnBoot() error {
 	dbInterfaces, err := s.interfacesRepository.GetAll()
 	if err != nil {
 		logging.Logger.Errorw(
 			"Error cleaning tunnel interfaces",
 			"err", err.Error(),
 		)
-		return
+		return err
 	}
 
 	for _, interfaceModel := range dbInterfaces {
@@ -202,9 +157,11 @@ func (s *WireguardTunnelServiceImpl) loadAndCleanTunnelInterfaces() {
 					"interface", interfaceModel,
 					"err", err.Error(),
 				)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
 func (s *WireguardTunnelServiceImpl) buildTunnelInfo(config *config.ServiceConfig) {
@@ -243,19 +200,6 @@ func (s *WireguardTunnelServiceImpl) getTunnelForInterface(interfaceModel *model
 		}
 	}
 	return nil
-}
-
-func (s *WireguardTunnelServiceImpl) refreshTunnelsInterfacesInformationRoutine() {
-	for {
-		select {
-		case _, ok := <-s.interfaceResolutionTimer.C:
-			if !ok {
-				logging.Logger.Debug("Exiting the refreshTunnelsInterfacesInformationRoutine")
-				return
-			}
-		}
-		s.refreshTunnelInterfacesInformation()
-	}
 }
 
 func appendProfileRange(networkRange string, ranges []net.IPNet) []net.IPNet {

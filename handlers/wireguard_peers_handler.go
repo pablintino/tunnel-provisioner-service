@@ -43,7 +43,7 @@ func registerWireguardPeersHandler(
 }
 
 func (h *wireguardPeersHandler) getPeersListHandler(c echo.Context) error {
-	peers, err := h.wireguardService.ListPeers(getUsernameFromContext(c))
+	peers, err := h.wireguardService.GetAggregatedPeersByUsername(getUsernameFromContext(c))
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (h *wireguardPeersHandler) peersPutHandler(c echo.Context) error {
 
 func (h *wireguardPeersHandler) getPeerByIdHandler(c echo.Context) error {
 
-	peer, err := h.wireguardService.GetPeer(getUsernameFromContext(c), c.Param("id"))
+	peer, err := h.wireguardService.GetAggregatedPeerByUsernameAndId(getUsernameFromContext(c), c.Param("id"))
 	if err != nil {
 		return err
 	}

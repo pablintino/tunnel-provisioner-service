@@ -15,13 +15,14 @@ import (
 )
 
 type LDAPConfiguration struct {
-	LdapURL       string  `koanf:"url"`
-	BaseDN        string  `koanf:"baseDn"`
-	BindUser      string  `koanf:"bindUser"`
-	BindPassword  *string `koanf:"bindPassword"`
-	UserFilter    *string `koanf:"userFilter"`
-	UserClass     string  `koanf:"userClass"`
-	UserAttribute string  `koanf:"userAttribute"`
+	LdapURL        string  `koanf:"url"`
+	BaseDN         string  `koanf:"baseDn"`
+	BindUser       string  `koanf:"bindUser"`
+	BindPassword   *string `koanf:"bindPassword"`
+	UserFilter     *string `koanf:"userFilter"`
+	UserClass      string  `koanf:"userClass"`
+	UserAttribute  string  `koanf:"userAttribute"`
+	EmailAttribute string  `koanf:"emailAttribute"`
 }
 
 type WireguardTunnelProfileConfiguration struct {
@@ -58,6 +59,7 @@ type ServiceConfig struct {
 	Providers            ProvidersConfig      `koanf:"providers"`
 	ServicePort          uint16               `koanf:"port"`
 	DebugMode            bool                 `koanf:"debug"`
+	SyncPeriod           uint64               `koanf:"sync-period-secs"`
 }
 
 func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
@@ -145,7 +147,8 @@ var koanfInstance = koanf.New(".")
 func LoadConfig(config *ServiceConfig) error {
 
 	err := koanfInstance.Load(confmap.Provider(map[string]interface{}{
-		"port": 8888,
+		"port":             8888,
+		"sync-period-secs": 900,
 	}, "."), nil)
 	if err != nil {
 		return err
