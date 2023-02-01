@@ -306,7 +306,7 @@ func (p *ROSWireguardRouterProvider) UpdatePeer(
 
 func (p *ROSWireguardRouterProvider) DeletePeerByPublicKey(tunnelInfo *models.WireguardTunnelInfo, publicKey string) error {
 	return p.clientPool.RunOnPoolNoResp(func(rawClient RouterOSRawApiClient) error {
-		return deletePeersByPublicKeys(rawClient, publicKey, tunnelInfo)
+		return deletePeerByPublicKeys(rawClient, publicKey, tunnelInfo)
 	})
 }
 
@@ -512,8 +512,6 @@ func addPeerToInterface(
 		return nil, err
 	}
 
-	buildCreateResultNetworks(peerAddress, networks)
-
 	return &WireguardProviderPeer{
 		Id:             retValue,
 		Rx:             0,
@@ -529,8 +527,8 @@ func addPeerToInterface(
 func buildCreateResultNetworks(peerAddress net.IP, networks []net.IPNet) []net.IPNet {
 	var result []net.IPNet
 	_, network, err := net.ParseCIDR(fmt.Sprintf("%s/32", peerAddress.String()))
-	if err != nil {
-		result = append(networks, *network)
+	if err == nil {
+		result = append(result, *network)
 	}
 	return append(result, networks...)
 }
@@ -560,7 +558,7 @@ func buildCreateUpdatePeerCommandArguments(interfaceName, pubKey, psk, descripti
 	return command
 }
 
-func deletePeersByPublicKeys(client RouterOSRawApiClient, publicKey string, tunnelInfo *models.WireguardTunnelInfo) error {
+func deletePeerByPublicKeys(client RouterOSRawApiClient, publicKey string, tunnelInfo *models.WireguardTunnelInfo) error {
 
 	peer, err := getPeerByPublicKey(client, publicKey, tunnelInfo)
 	if err != nil {

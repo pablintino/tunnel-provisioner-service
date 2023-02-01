@@ -16,7 +16,6 @@ type WireguardPeerKeyPair struct {
 type WireguardProviderPeer struct {
 	Id             string
 	PublicKey      string
-	PreSharedKey   string
 	AllowedAddress []net.IPNet
 	Description    string
 	Disabled       bool
@@ -25,9 +24,9 @@ type WireguardProviderPeer struct {
 }
 
 func (w WireguardProviderPeer) String() string {
-	return fmt.Sprintf("WireguardProviderPeer[Id=%s, PublicKey=%s, PreSharedKey=%s,AllowedAddress=%s, Description=%s,"+
+	return fmt.Sprintf("WireguardProviderPeer[Id=%s, PublicKey=%s, AllowedAddress=%s, Description=%s,"+
 		" Disabled=%v, Rx=%d, Tx=%d]", w.Id, utils.MasqueradeSensitiveString(w.PublicKey, 5),
-		utils.MasqueradeSensitiveString(w.PreSharedKey, 5), w.AllowedAddress, w.Description, w.Disabled,
+		w.AllowedAddress, w.Description, w.Disabled,
 		w.Rx, w.Tx)
 }
 
