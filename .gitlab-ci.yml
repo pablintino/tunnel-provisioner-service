@@ -1,0 +1,19 @@
+image: golang:1.19-buster
+
+stages:
+  - test
+  - build
+
+test:
+  stage: test
+  script:
+    - go test ./... -v
+
+compile:
+  stage: build
+  script:
+    - mkdir -p bin
+    - go build -o bin ./...
+  artifacts:
+    paths:
+      - bin
