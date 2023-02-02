@@ -19,7 +19,12 @@ import (
 type mockedRouterOSRawApiClientCallData struct {
 	Reply          *routeros.Reply
 	SimulatedError error
-	Count          uint32
+	Count          uint
+	DesiredCount   int
+}
+
+type mockedResponseOptions struct {
+	CallCount uint
 }
 
 type MockedRouterOSRawApiClient struct {
@@ -42,7 +47,7 @@ func (m *MockedRouterOSRawApiClient) RunArgs(args ...string) (*routeros.Reply, e
 	return callData.Reply, nil
 }
 
-func (m *MockedRouterOSRawApiClient) EnsureCommandMatch(count uint32, args ...string) {
+func (m *MockedRouterOSRawApiClient) EnsureCommandMatch(count uint, args ...string) {
 
 	if len(args) == 0 {
 		m.testing.Fatalf("mock run arguments cannnot be empty")
@@ -51,6 +56,16 @@ func (m *MockedRouterOSRawApiClient) EnsureCommandMatch(count uint32, args ...st
 
 	callData := m.getEnsureMockCallData(args...)
 	assert.Equal(m.testing, count, callData.Count)
+}
+
+func (m *MockedRouterOSRawApiClient) VerifyMockCalls() {
+	for _, c := range m.responses {
+		for _, callData := range c {
+			if callData.DesiredCount > -1 {
+				assert.Equal(m.testing, uint(callData.DesiredCount), callData.Count)
+			}
+		}
+	}
 }
 
 func (m *MockedRouterOSRawApiClient) getEnsureMockCallData(command ...string) *mockedRouterOSRawApiClientCallData {
@@ -70,7 +85,7 @@ func (m *MockedRouterOSRawApiClient) Close() {
 
 }
 
-func (m *MockedRouterOSRawApiClient) AddResponse(reply *routeros.Reply, command string, args ...string) {
+func (m *MockedRouterOSRawApiClient) AddResponse(reply *routeros.Reply, options *mockedResponseOptions, command string, args ...string) {
 	if len(command) == 0 {
 		m.testing.Fatalf("mock command cannnot be empty")
 		return
@@ -82,7 +97,12 @@ func (m *MockedRouterOSRawApiClient) AddResponse(reply *routeros.Reply, command 
 		m.responses[command] = commandArgsMap
 	}
 
-	callbackData := &mockedRouterOSRawApiClientCallData{Reply: reply}
+	targetCount := -1
+	if options != nil {
+		targetCount = int(options.CallCount)
+	}
+
+	callbackData := &mockedRouterOSRawApiClientCallData{Reply: reply, DesiredCount: targetCount}
 	if len(args) == 0 {
 		commandArgsMap[""] = callbackData
 	} else {
@@ -129,6 +149,7 @@ func TestROsProviderCreatePeerBasic(t *testing.T) {
 				Map:  map[string]string{"ret": "*107"},
 			},
 		},
+		nil,
 		"/interface/wireguard/peers/add",
 		"=interface=test-interface",
 		"=public-key=test-key",
@@ -183,7 +204,7 @@ func TestROsProviderUpdatePeerBasic(t *testing.T) {
 		"=allowed-address=192.168.177.2/32,192.168.0.0/24,192.168.1.0/24,192.168.2.0/24",
 	}
 
-	apiMock.AddResponse(&routeros.Reply{}, command[0], command[1:]...)
+	apiMock.AddResponse(&routeros.Reply{}, &mockedResponseOptions{CallCount: 1}, command[0], command[1:]...)
 
 	rosProvider := services.NewROSWireguardRouterProvider("test-ros-provider", &rosConfig, func(*config.RouterOSProviderConfig) (services.RouterOSRawApiClient, error) {
 		return apiMock, nil
@@ -191,7 +212,7 @@ func TestROsProviderUpdatePeerBasic(t *testing.T) {
 
 	err := rosProvider.UpdatePeer("*1D", "test-key", "test-description", "test-psk", &tunnelInfo, &profileInfo, hostIp)
 	assert.Nil(t, err)
-	apiMock.EnsureCommandMatch(1, command...)
+	apiMock.VerifyMockCalls()
 }
 
 func TestROsProviderGetPeerByPublicKeyBasic(t *testing.T) {
@@ -202,12 +223,6 @@ func TestROsProviderGetPeerByPublicKeyBasic(t *testing.T) {
 	tunnelInfo := models.WireguardTunnelInfo{Interface: models.WireguardInterfaceModel{Name: "test-interface"}}
 
 	apiMock := NewMockedRouterOSRawApiClient(t)
-
-	command := []string{
-		"/interface/wireguard/peers/print",
-		fmt.Sprintf("?interface=%s", tunnelInfo.Interface.Name),
-		"?public-key=test-key",
-	}
 
 	apiMock.AddResponse(&routeros.Reply{
 		Re: []*proto.Sentence{
@@ -235,7 +250,9 @@ func TestROsProviderGetPeerByPublicKeyBasic(t *testing.T) {
 			Word: "!done",
 			Tag:  "",
 		},
-	}, command[0], command[1:]...)
+	}, &mockedResponseOptions{CallCount: 1}, "/interface/wireguard/peers/print",
+		fmt.Sprintf("?interface=%s", tunnelInfo.Interface.Name),
+		"?public-key=test-key")
 
 	rosProvider := services.NewROSWireguardRouterProvider("test-ros-provider", &rosConfig, func(*config.RouterOSProviderConfig) (services.RouterOSRawApiClient, error) {
 		return apiMock, nil
@@ -244,7 +261,7 @@ func TestROsProviderGetPeerByPublicKeyBasic(t *testing.T) {
 	peer, err := rosProvider.GetPeerByPublicKey("test-key", &tunnelInfo)
 	assert.Nil(t, err)
 	assert.NotNil(t, peer)
-	apiMock.EnsureCommandMatch(1, command...)
+	apiMock.VerifyMockCalls()
 
 	_, hostNet, _ := net.ParseCIDR("192.168.177.2/32")
 	_, net1, _ := net.ParseCIDR("192.168.0.0/24")
@@ -272,12 +289,6 @@ func TestROsProviderDeletePeerByPublicKeyBasic(t *testing.T) {
 
 	apiMock := NewMockedRouterOSRawApiClient(t)
 
-	printCommand := []string{
-		"/interface/wireguard/peers/print",
-		"?public-key=test-key",
-		"?interface=test-interface",
-	}
-
 	apiMock.AddResponse(&routeros.Reply{
 		Re: []*proto.Sentence{
 			{
@@ -304,18 +315,16 @@ func TestROsProviderDeletePeerByPublicKeyBasic(t *testing.T) {
 			Word: "!done",
 			Tag:  "",
 		},
-	}, printCommand[0], printCommand[1:]...)
+	}, &mockedResponseOptions{CallCount: 1}, "/interface/wireguard/peers/print",
+		"?public-key=test-key", "?interface=test-interface")
 
-	deleteCommand := []string{
-		"/interface/wireguard/peers/remove",
-		"=.id=*1D",
-	}
 	apiMock.AddResponse(&routeros.Reply{
 		Done: &proto.Sentence{
 			Word: "!done",
 			Tag:  "",
 		},
-	}, deleteCommand[0], deleteCommand[1:]...)
+	}, &mockedResponseOptions{CallCount: 1}, "/interface/wireguard/peers/remove",
+		"=.id=*1D")
 
 	rosProvider := services.NewROSWireguardRouterProvider("test-ros-provider", &rosConfig, func(*config.RouterOSProviderConfig) (services.RouterOSRawApiClient, error) {
 		return apiMock, nil
@@ -324,8 +333,7 @@ func TestROsProviderDeletePeerByPublicKeyBasic(t *testing.T) {
 	err := rosProvider.DeletePeerByPublicKey(&tunnelInfo, "test-key")
 	assert.Nil(t, err)
 
-	apiMock.EnsureCommandMatch(1, printCommand...)
-	apiMock.EnsureCommandMatch(1, deleteCommand...)
+	apiMock.VerifyMockCalls()
 }
 
 func TestROsProviderGetInterfaceIpBasic(t *testing.T) {
@@ -336,11 +344,6 @@ func TestROsProviderGetInterfaceIpBasic(t *testing.T) {
 	tunnelInfo := models.WireguardTunnelInfo{Interface: models.WireguardInterfaceModel{Name: "test-interface"}}
 
 	apiMock := NewMockedRouterOSRawApiClient(t)
-
-	command := []string{
-		"/ip/address/print",
-		fmt.Sprintf("?interface=%s", tunnelInfo.Interface.Name),
-	}
 
 	apiMock.AddResponse(&routeros.Reply{
 		Re: []*proto.Sentence{
@@ -362,7 +365,8 @@ func TestROsProviderGetInterfaceIpBasic(t *testing.T) {
 			Word: "!done",
 			Tag:  "",
 		},
-	}, command[0], command[1:]...)
+	}, &mockedResponseOptions{CallCount: 1}, "/ip/address/print",
+		fmt.Sprintf("?interface=%s", tunnelInfo.Interface.Name))
 
 	rosProvider := services.NewROSWireguardRouterProvider("test-ros-provider", &rosConfig, func(*config.RouterOSProviderConfig) (services.RouterOSRawApiClient, error) {
 		return apiMock, nil
@@ -371,8 +375,148 @@ func TestROsProviderGetInterfaceIpBasic(t *testing.T) {
 	ip, network, err := rosProvider.GetInterfaceIp("test-interface")
 	assert.Nil(t, err)
 	assert.NotNil(t, network)
-	apiMock.EnsureCommandMatch(1, command...)
+	apiMock.VerifyMockCalls()
 
 	ip.Equal(net.IPv4(192, 168, 177, 1))
 	assert.Equal(t, "192.168.177.0/24", network.String())
+}
+
+func TestROsProviderGetTunnelInterfaceInfoFromCloudBasic(t *testing.T) {
+	logging.Initialize(false)
+	defer logging.Release()
+
+	rosConfig := config.RouterOSProviderConfig{Username: "username", Host: "host", Port: 12345, Password: "password"}
+
+	apiMock := NewMockedRouterOSRawApiClient(t)
+
+	apiMock.AddResponse(&routeros.Reply{
+		Re: []*proto.Sentence{
+			{
+				Word: "!re",
+				Tag:  "",
+				Map: map[string]string{
+					"ddns-enabled":         "true",
+					"ddns-update-interval": "none",
+					"update-time":          "false",
+					"public-address":       "1.1.1.1",
+					"dns-name":             "7328742384nbff4.sn.mynetname.net",
+					"status":               "updated",
+				},
+			},
+		},
+		Done: &proto.Sentence{
+			Word: "!done",
+			Tag:  "",
+		},
+	}, &mockedResponseOptions{CallCount: 1}, "/ip/cloud/print")
+
+	apiMock.AddResponse(&routeros.Reply{
+		Re: []*proto.Sentence{
+			{
+				Word: "!re",
+				Tag:  "",
+				Map: map[string]string{
+					".id":         "*1D",
+					"name":        "test-interface",
+					"mtu":         "1420",
+					"listen-port": "13231",
+					"private-key": "*****",
+					"public-key":  "test-key",
+					"running":     "true",
+					"disabled":    "false",
+				},
+			},
+		},
+		Done: &proto.Sentence{
+			Word: "!done",
+			Tag:  "",
+		},
+	},
+		&mockedResponseOptions{CallCount: 1},
+		"/interface/wireguard/print", "?name=test-interface")
+
+	rosProvider := services.NewROSWireguardRouterProvider("test-ros-provider", &rosConfig, func(*config.RouterOSProviderConfig) (services.RouterOSRawApiClient, error) {
+		return apiMock, nil
+	})
+
+	ifaceInfo, err := rosProvider.GetTunnelInterfaceInfo("test-interface")
+	assert.Nil(t, err)
+	assert.NotNil(t, ifaceInfo)
+	assert.Equal(t, "7328742384nbff4.sn.mynetname.net:13231", ifaceInfo.Endpoint)
+	assert.Equal(t, "test-interface", ifaceInfo.Name)
+	assert.Equal(t, "test-key", ifaceInfo.PublicKey)
+	assert.True(t, ifaceInfo.Enabled)
+
+	apiMock.VerifyMockCalls()
+}
+
+func TestROsProviderGetTunnelInterfaceInfoFromIfaceBasic(t *testing.T) {
+	logging.Initialize(false)
+	defer logging.Release()
+
+	rosConfig := config.RouterOSProviderConfig{Username: "username", Host: "host", Port: 12345, Password: "password", TunnelEndpointInterface: "out-iface"}
+
+	apiMock := NewMockedRouterOSRawApiClient(t)
+
+	apiMock.AddResponse(&routeros.Reply{
+		Re: []*proto.Sentence{
+			{
+				Word: "!re",
+				Tag:  "",
+				Map: map[string]string{
+					".id":       "*2",
+					"address":   "1.1.1.1/32",
+					"network":   "1.1.1.0",
+					"interface": "test-wg",
+					"invalid":   "false",
+					"dynamic":   "false",
+					"disabled":  "false",
+				},
+			},
+		},
+		Done: &proto.Sentence{
+			Word: "!done",
+			Tag:  "",
+		},
+	}, &mockedResponseOptions{CallCount: 1}, "/ip/address/print",
+		"?interface=out-iface")
+
+	apiMock.AddResponse(&routeros.Reply{
+		Re: []*proto.Sentence{
+			{
+				Word: "!re",
+				Tag:  "",
+				Map: map[string]string{
+					".id":         "*1D",
+					"name":        "test-interface",
+					"mtu":         "1420",
+					"listen-port": "13231",
+					"private-key": "*****",
+					"public-key":  "test-key",
+					"running":     "true",
+					"disabled":    "false",
+				},
+			},
+		},
+		Done: &proto.Sentence{
+			Word: "!done",
+			Tag:  "",
+		},
+	},
+		&mockedResponseOptions{CallCount: 1},
+		"/interface/wireguard/print", "?name=test-interface")
+
+	rosProvider := services.NewROSWireguardRouterProvider("test-ros-provider", &rosConfig, func(*config.RouterOSProviderConfig) (services.RouterOSRawApiClient, error) {
+		return apiMock, nil
+	})
+
+	ifaceInfo, err := rosProvider.GetTunnelInterfaceInfo("test-interface")
+	assert.Nil(t, err)
+	assert.NotNil(t, ifaceInfo)
+	assert.Equal(t, "1.1.1.1:13231", ifaceInfo.Endpoint)
+	assert.Equal(t, "test-interface", ifaceInfo.Name)
+	assert.Equal(t, "test-key", ifaceInfo.PublicKey)
+	assert.True(t, ifaceInfo.Enabled)
+
+	apiMock.VerifyMockCalls()
 }
