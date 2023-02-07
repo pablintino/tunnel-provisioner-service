@@ -8,14 +8,30 @@ import (
 	"tunnel-provisioner-service/utils"
 )
 
-type peerFsmUnprovisioningAction struct {
+type baseFsmAction struct {
 	peer         *models.WireguardPeerModel
 	peersService *WireguardPeersServiceImpl
 }
 
-func (a *peerFsmUnprovisioningAction) sendToError(err error) utils.EventType {
+func (a *baseFsmAction) sendToError(err error) utils.EventType {
 	a.peer.ProvisionStatus = err.Error()
 	return peerFsmEventError
+}
+
+func (a *baseFsmAction) saveErrorStatus(peer *models.WireguardPeerModel, err error) {
+	a.peer.ProvisionStatus = err.Error()
+	if _, updateErr := a.peersService.wireguardPeersRepository.UpdatePeer(a.peer); updateErr != nil {
+		logging.Logger.Errorw(
+			"error saving peer provision status",
+			"original-error", err.Error(),
+			"update-error", updateErr,
+			"peer", peer.Id.Hex(),
+		)
+	}
+}
+
+type peerFsmUnprovisioningAction struct {
+	baseFsmAction
 }
 
 func (a *peerFsmUnprovisioningAction) Execute(_ utils.EventContext) utils.EventType {
@@ -30,13 +46,7 @@ func (a *peerFsmUnprovisioningAction) Execute(_ utils.EventContext) utils.EventT
 }
 
 type peerFsmUnprovisionAction struct {
-	peer         *models.WireguardPeerModel
-	peersService *WireguardPeersServiceImpl
-}
-
-func (a *peerFsmUnprovisionAction) sendToError(err error) utils.EventType {
-	a.peer.ProvisionStatus = err.Error()
-	return peerFsmEventError
+	baseFsmAction
 }
 
 func (a *peerFsmUnprovisionAction) Execute(_ utils.EventContext) utils.EventType {
@@ -67,13 +77,7 @@ func (a *peerFsmUnprovisionAction) Execute(_ utils.EventContext) utils.EventType
 }
 
 type peerFsmProvisioningAction struct {
-	peer         *models.WireguardPeerModel
-	peersService *WireguardPeersServiceImpl
-}
-
-func (a *peerFsmProvisioningAction) sendToError(err error) utils.EventType {
-	a.peer.ProvisionStatus = err.Error()
-	return peerFsmEventError
+	baseFsmAction
 }
 
 func (a *peerFsmProvisioningAction) Execute(_ utils.EventContext) utils.EventType {
@@ -109,13 +113,7 @@ func (a *peerFsmProvisioningAction) Execute(_ utils.EventContext) utils.EventTyp
 }
 
 type peerFsmProvisionAction struct {
-	peer         *models.WireguardPeerModel
-	peersService *WireguardPeersServiceImpl
-}
-
-func (a *peerFsmProvisionAction) sendToError(err error) utils.EventType {
-	a.peer.ProvisionStatus = err.Error()
-	return peerFsmEventError
+	baseFsmAction
 }
 
 func (a *peerFsmProvisionAction) provisionPeerWithoutKey(peer *models.WireguardPeerModel,
@@ -205,8 +203,7 @@ func (a *peerFsmProvisionAction) Execute(_ utils.EventContext) utils.EventType {
 }
 
 type peerFsmDeletingAction struct {
-	peer         *models.WireguardPeerModel
-	peersService *WireguardPeersServiceImpl
+	baseFsmAction
 }
 
 func (a *peerFsmDeletingAction) Execute(_ utils.EventContext) utils.EventType {
@@ -218,14 +215,8 @@ func (a *peerFsmDeletingAction) Execute(_ utils.EventContext) utils.EventType {
 	return peerFsmEventDelete
 }
 
-func (a *peerFsmDeletingAction) sendToError(err error) utils.EventType {
-	a.peer.ProvisionStatus = err.Error()
-	return peerFsmEventError
-}
-
 type peerFsmDeleteAction struct {
-	peer         *models.WireguardPeerModel
-	peersService *WireguardPeersServiceImpl
+	baseFsmAction
 }
 
 func (a *peerFsmDeleteAction) Execute(_ utils.EventContext) utils.EventType {
@@ -264,21 +255,8 @@ func (a *peerFsmDeleteAction) Execute(_ utils.EventContext) utils.EventType {
 	return utils.NoOp
 }
 
-func (a *peerFsmDeleteAction) saveErrorStatus(peer *models.WireguardPeerModel, err error) {
-	a.peer.ProvisionStatus = err.Error()
-	if _, updateErr := a.peersService.wireguardPeersRepository.UpdatePeer(a.peer); updateErr != nil {
-		logging.Logger.Errorw(
-			"error saving peer provision status",
-			"original-error", err.Error(),
-			"update-error", updateErr,
-			"peer", peer.Id.Hex(),
-		)
-	}
-}
-
 type peerFsmForceDeleteAction struct {
-	peer         *models.WireguardPeerModel
-	peersService *WireguardPeersServiceImpl
+	baseFsmAction
 }
 
 func (a *peerFsmForceDeleteAction) Execute(_ utils.EventContext) utils.EventType {
@@ -302,21 +280,8 @@ func (a *peerFsmForceDeleteAction) Execute(_ utils.EventContext) utils.EventType
 	return utils.NoOp
 }
 
-func (a *peerFsmForceDeleteAction) saveErrorStatus(peer *models.WireguardPeerModel, err error) {
-	a.peer.ProvisionStatus = err.Error()
-	if _, updateErr := a.peersService.wireguardPeersRepository.UpdatePeer(a.peer); updateErr != nil {
-		logging.Logger.Errorw(
-			"error saving peer provision status",
-			"original-error", err.Error(),
-			"update-error", updateErr,
-			"peer", peer.Id.Hex(),
-		)
-	}
-}
-
 type peerFsmErrorAction struct {
-	peer         *models.WireguardPeerModel
-	peersService *WireguardPeersServiceImpl
+	baseFsmAction
 }
 
 func (a *peerFsmErrorAction) Execute(_ utils.EventContext) utils.EventType {
@@ -337,86 +302,86 @@ func newPeerFsm(peer *models.WireguardPeerModel, peersService *WireguardPeersSer
 		Transitions: utils.Transitions{
 			models.ProvisionStateCreated: utils.FSMEventTransitions{
 				/* Evt. Provision: Created -> Provisioning */
-				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisioningAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateProvisioning},
+				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisioningAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateProvisioning},
 
 				/* Evt. Error: Created -> Error */
-				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateError},
+				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateError},
 			},
 			models.ProvisionStateUnprovisioned: utils.FSMEventTransitions{
 				/* Evt. Provision: Unprovisioned -> Provisioning */
-				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisioningAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateProvisioning},
+				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisioningAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateProvisioning},
 
 				/* Evt. Delete: Unprovisioned-> Deleting */
-				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleting},
+				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleting},
 
 				/* Evt. Force Delete: Unprovisioned-> Deleted */
-				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleted},
+				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 
 				/* Evt. Unprovision: Unprovisioned -> Unprovisioned */
-				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisionAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateUnprovisioned},
+				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisionAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateUnprovisioned},
 
 				/* Evt. Error: Unprovisioned -> Error */
-				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateError},
+				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateError},
 			},
 			models.ProvisionStateProvisioning: utils.FSMEventTransitions{
 				/* Evt. Provision: Provisioning -> Provisioned */
-				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisionAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateProvisioned},
+				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisionAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateProvisioned},
 
 				/* Evt. Error: Provisioning -> Error */
-				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateError},
+				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateError},
 
 				/* Evt. Delete: Provisioning -> Deleting */
-				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleting},
+				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleting},
 
 				/* Evt. Force Delete: Provisioning-> Deleted */
-				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleted},
+				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 
 				/* Evt. Unprovision: Provisioned -> Error */
-				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisioningAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateUnprovisioning},
+				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisioningAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateUnprovisioning},
 			},
 			models.ProvisionStateProvisioned: utils.FSMEventTransitions{
 				/* Evt. Delete: Provisioned-> Deleting */
-				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleting},
+				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleting},
 
 				/* Evt. Delete: Provisioned-> Provisioned */
-				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisionAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateProvisioned},
+				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisionAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateProvisioned},
 
 				/* Evt. Error: Provisioned -> Error */
-				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateError},
+				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateError},
 
 				/* Evt. Force Delete: Provisioned-> Deleted */
-				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleted},
+				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 
 				/* Evt. Unprovision: Provisioned -> Unprovisioning */
-				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisioningAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateUnprovisioning},
+				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisioningAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateUnprovisioning},
 			},
 
 			models.ProvisionStateUnprovisioning: utils.FSMEventTransitions{
 				/* Evt. Error: Unprovisioning -> Error */
-				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateError},
+				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateError},
 
 				/* Evt. Unprovision: Unprovisioning -> Unprovisioned */
-				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisionAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateUnprovisioned},
+				peerFsmEventUnprovision: utils.FSMTransition{Action: &peerFsmUnprovisionAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateUnprovisioned},
 
 				/* Evt. Force Delete: Unprovisioning-> Deleted */
-				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleted},
+				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 			},
 			models.ProvisionStateDeleting: utils.FSMEventTransitions{
 				/* Evt. Delete: Deleting-> Deleted */
-				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeleteAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleted},
+				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 
 				/* Evt. Force Delete: Deleting-> Deleted */
-				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleted},
+				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 			},
 			models.ProvisionStateError: utils.FSMEventTransitions{
 				/* Evt. Delete: Error -> Deleting */
-				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleting},
+				peerFsmEventDelete: utils.FSMTransition{Action: &peerFsmDeletingAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleting},
 
 				/* Evt. Force Delete: Error-> Deleted */
-				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateDeleted},
+				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 
 				/* Evt. Provision: Error -> Provisioning */
-				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisioningAction{peer: peer, peersService: peersService}, Target: models.ProvisionStateProvisioning},
+				peerFsmEventProvision: utils.FSMTransition{Action: &peerFsmProvisioningAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateProvisioning},
 			},
 		},
 	}

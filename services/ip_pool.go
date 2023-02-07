@@ -10,9 +10,9 @@ import (
 )
 
 type PoolService interface {
-	GetNextIp(tunnel *models.WireguardTunnelInfo) (net.IP, error)
-	RemoveIp(tunnel *models.WireguardTunnelInfo, ip net.IP) error
-	DeletePool(tunnel *models.WireguardTunnelInfo) error
+	GetNextIp(tunnelInfo *models.WireguardTunnelInfo) (net.IP, error)
+	RemoveIp(tunnelInfo *models.WireguardTunnelInfo, ip net.IP) error
+	DeletePool(tunnelInfo *models.WireguardTunnelInfo) error
 }
 
 type PoolServiceImpl struct {
@@ -25,26 +25,26 @@ func NewPoolService(ipPoolRepository repositories.IpPoolRepository, providers ma
 	return &PoolServiceImpl{ipPoolRepository: ipPoolRepository, providers: providers}
 }
 
-func (p *PoolServiceImpl) DeletePool(tunnel *models.WireguardTunnelInfo) error {
+func (p *PoolServiceImpl) DeletePool(tunnelInfo *models.WireguardTunnelInfo) error {
 	// Can only be accessed by one goroutine
 	p.ipMutex.Lock()
 	defer p.ipMutex.Unlock()
-	return p.ipPoolRepository.DeleteTunnelPool(tunnel.Provider, tunnel.Name)
+	return p.ipPoolRepository.DeleteTunnelPool(tunnelInfo.Provider, tunnelInfo.Name)
 
 }
 
-func (p *PoolServiceImpl) RemoveIp(tunnel *models.WireguardTunnelInfo, ip net.IP) error {
+func (p *PoolServiceImpl) RemoveIp(tunnelInfo *models.WireguardTunnelInfo, ip net.IP) error {
 	// Can only be accessed by one goroutine
 	p.ipMutex.Lock()
 	defer p.ipMutex.Unlock()
 
-	pool, err := p.ipPoolRepository.GetPool(tunnel.Provider, tunnel.Name)
+	pool, err := p.ipPoolRepository.GetPool(tunnelInfo.Provider, tunnelInfo.Name)
 	if err != nil {
 		return err
 	}
 
 	if pool == nil {
-		return fmt.Errorf("cannot find IP Pool for %s provider and %s tunnel", tunnel.Provider, tunnel.Name)
+		return fmt.Errorf("cannot find IP Pool for %s provider and %s tunnel", tunnelInfo.Provider, tunnelInfo.Name)
 	}
 
 	inUse, err := removeIpFromUsedSlice(ip, pool.InUse)
@@ -61,18 +61,18 @@ func (p *PoolServiceImpl) RemoveIp(tunnel *models.WireguardTunnelInfo, ip net.IP
 	return nil
 }
 
-func (p *PoolServiceImpl) GetNextIp(tunnel *models.WireguardTunnelInfo) (net.IP, error) {
+func (p *PoolServiceImpl) GetNextIp(tunnelInfo *models.WireguardTunnelInfo) (net.IP, error) {
 	// Can only be accessed by one goroutine
 	p.ipMutex.Lock()
 	defer p.ipMutex.Unlock()
 
-	pool, err := p.ipPoolRepository.GetPool(tunnel.Provider, tunnel.Name)
+	pool, err := p.ipPoolRepository.GetPool(tunnelInfo.Provider, tunnelInfo.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	if pool == nil {
-		pool, err = p.createIpPool(tunnel)
+		pool, err = p.createIpPool(tunnelInfo)
 		if err != nil {
 			return nil, err
 		}
@@ -92,20 +92,20 @@ func (p *PoolServiceImpl) GetNextIp(tunnel *models.WireguardTunnelInfo) (net.IP,
 	return next, nil
 }
 
-func (p *PoolServiceImpl) createIpPool(tunnel *models.WireguardTunnelInfo) (*models.IpPoolModel, error) {
-	provider, found := p.providers[tunnel.Provider]
+func (p *PoolServiceImpl) createIpPool(tunnelInfo *models.WireguardTunnelInfo) (*models.IpPoolModel, error) {
+	provider, found := p.providers[tunnelInfo.Provider]
 	if !found {
-		return nil, fmt.Errorf("cannot get pool ip cause cannot find %s provider", tunnel.Provider)
+		return nil, fmt.Errorf("cannot get pool ip cause cannot find %s provider", tunnelInfo.Provider)
 	}
 
-	ip, network, err := provider.GetInterfaceIp(tunnel.Interface.Name)
+	ip, network, err := provider.GetInterfaceIp(tunnelInfo.Interface.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	pool := &models.IpPoolModel{
-		Provider: tunnel.Provider,
-		Tunnel:   tunnel.Name,
+		Provider: tunnelInfo.Provider,
+		Tunnel:   tunnelInfo.Name,
 		Network:  *network,
 		Reserved: []net.IP{ip}, // Interface address is reserved by default
 		InUse:    []net.IP{},
