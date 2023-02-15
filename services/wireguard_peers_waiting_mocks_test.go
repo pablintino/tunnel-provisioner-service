@@ -1,0 +1,226 @@
+package services_test
+
+import (
+	"github.com/golang/mock/gomock"
+	"net"
+	"sync/atomic"
+	"testing"
+	"time"
+	"tunnel-provisioner-service/models"
+)
+
+type WaitingMockWireguardPeersRepository struct {
+	mock                       *MockWireguardPeersRepository
+	getPeersByUsernameCount    atomic.Uint32
+	getPeersByUsernameExpected uint32
+	getPeersByTunnelIdCount    atomic.Uint32
+	getPeersByTunnelIdExpected uint32
+	getPeerByIdCount           atomic.Uint32
+	getPeerByIdExpected        uint32
+	savePeerCount              atomic.Uint32
+	savePeerExpected           uint32
+	updatePeerCount            atomic.Uint32
+	updatePeerExpected         uint32
+	deletePeerCount            atomic.Uint32
+	deletePeerExpected         uint32
+	getAllCount                atomic.Uint32
+	getAllExpected             uint32
+	t                          *testing.T
+	updateChan                 chan struct{}
+}
+
+func (m *WaitingMockWireguardPeersRepository) SetGetPeersByUsernameExpected(expected uint32) {
+	m.getPeersByUsernameExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) SetGetPeersByTunnelIdExpected(expected uint32) {
+	m.getPeersByTunnelIdExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) SetGetPeerByIdExpected(expected uint32) {
+	m.getPeerByIdExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) SetSavePeerExpected(expected uint32) {
+	m.savePeerExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) SetUpdatePeerExpected(expected uint32) {
+	m.updatePeerExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) SetDeletePeerExpected(expected uint32) {
+	m.deletePeerExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) SetGetAllExpected(expected uint32) {
+	m.getAllExpected = expected
+}
+
+func NewWaitingMockWireguardPeersRepository(ctrl *gomock.Controller, t *testing.T) *WaitingMockWireguardPeersRepository {
+	return &WaitingMockWireguardPeersRepository{
+		mock:       NewMockWireguardPeersRepository(ctrl),
+		t:          t,
+		updateChan: make(chan struct{}, 1024),
+	}
+}
+
+func (m *WaitingMockWireguardPeersRepository) EXPECT() *MockWireguardPeersRepositoryMockRecorder {
+	return m.mock.EXPECT()
+}
+
+func (m *WaitingMockWireguardPeersRepository) GetPeersByUsername(username string) ([]*models.WireguardPeerModel, error) {
+	val, err := m.mock.GetPeersByUsername(username)
+	m.getPeersByUsernameCount.Add(1)
+	m.updateChan <- struct{}{}
+	return val, err
+}
+
+func (m *WaitingMockWireguardPeersRepository) GetPeersByTunnelId(tunnelId string) ([]*models.WireguardPeerModel, error) {
+	val, err := m.mock.GetPeersByTunnelId(tunnelId)
+	m.getPeersByTunnelIdCount.Add(1)
+	m.updateChan <- struct{}{}
+	return val, err
+}
+
+func (m *WaitingMockWireguardPeersRepository) GetPeerById(username, id string) (*models.WireguardPeerModel, error) {
+	val, err := m.mock.GetPeerById(username, id)
+	m.getPeerByIdCount.Add(1)
+	m.updateChan <- struct{}{}
+	return val, err
+}
+
+func (m *WaitingMockWireguardPeersRepository) SavePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error) {
+	val, err := m.mock.SavePeer(peer)
+	m.savePeerCount.Add(1)
+	m.updateChan <- struct{}{}
+	return val, err
+}
+
+func (m *WaitingMockWireguardPeersRepository) UpdatePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error) {
+	val, err := m.mock.UpdatePeer(peer)
+	m.updatePeerCount.Add(1)
+	m.updateChan <- struct{}{}
+	return val, err
+}
+
+func (m *WaitingMockWireguardPeersRepository) GetAll() ([]*models.WireguardPeerModel, error) {
+	val, err := m.mock.GetAll()
+	m.getAllCount.Add(1)
+	m.updateChan <- struct{}{}
+	return val, err
+}
+
+func (m *WaitingMockWireguardPeersRepository) DeletePeer(peer *models.WireguardPeerModel) error {
+	err := m.mock.DeletePeer(peer)
+	m.deletePeerCount.Add(1)
+	m.updateChan <- struct{}{}
+	return err
+}
+
+func (m *WaitingMockWireguardPeersRepository) isCountReached() bool {
+
+	return m.deletePeerCount.Load() == m.deletePeerExpected &&
+		m.updatePeerCount.Load() == m.updatePeerExpected &&
+		m.savePeerCount.Load() == m.savePeerExpected &&
+		m.getAllCount.Load() == m.getAllExpected &&
+		m.getPeersByUsernameCount.Load() == m.getPeersByUsernameExpected &&
+		m.getPeerByIdCount.Load() == m.getPeerByIdExpected &&
+		m.getPeersByTunnelIdCount.Load() == m.getPeersByTunnelIdExpected
+
+}
+
+func (m *WaitingMockWireguardPeersRepository) Wait(timeout time.Duration) {
+	timeoutChan := time.After(timeout)
+	for {
+		select {
+		case <-m.updateChan:
+			if m.isCountReached() {
+				return
+			}
+		case <-timeoutChan:
+			m.t.Fatalf("WaitingMockWireguardPeersRepository wait timeout")
+			return
+		}
+	}
+
+}
+
+type WaitingMockPoolService struct {
+	mock               *MockPoolService
+	deletePoolCount    atomic.Uint32
+	deletePoolExpected uint32
+	getNextIpCount     atomic.Uint32
+	getNextIpExpected  uint32
+	removeIpCount      atomic.Uint32
+	removeIpExpected   uint32
+	t                  *testing.T
+	updateChan         chan struct{}
+}
+
+func NewWaitingMockPoolService(ctrl *gomock.Controller, t *testing.T) *WaitingMockPoolService {
+	return &WaitingMockPoolService{
+		mock:       NewMockPoolService(ctrl),
+		t:          t,
+		updateChan: make(chan struct{}, 1024),
+	}
+}
+
+func (m *WaitingMockPoolService) EXPECT() *MockPoolServiceMockRecorder {
+	return m.mock.EXPECT()
+}
+
+func (m *WaitingMockPoolService) SetDeletePoolExpected(expected uint32) {
+	m.deletePoolExpected = expected
+}
+
+func (m *WaitingMockPoolService) SetGetNextIpExpected(expected uint32) {
+	m.getNextIpExpected = expected
+}
+
+func (m *WaitingMockPoolService) SetRemoveIpExpected(expected uint32) {
+	m.removeIpExpected = expected
+}
+
+func (m *WaitingMockPoolService) DeletePool(tunnel *models.WireguardTunnelInfo) error {
+	err := m.mock.DeletePool(tunnel)
+	m.deletePoolCount.Add(1)
+	m.updateChan <- struct{}{}
+	return err
+}
+
+func (m *WaitingMockPoolService) GetNextIp(tunnel *models.WireguardTunnelInfo) (net.IP, error) {
+	val, err := m.mock.GetNextIp(tunnel)
+	m.getNextIpCount.Add(1)
+	m.updateChan <- struct{}{}
+	return val, err
+}
+
+func (m *WaitingMockPoolService) RemoveIp(tunnel *models.WireguardTunnelInfo, ip net.IP) error {
+	err := m.mock.RemoveIp(tunnel, ip)
+	m.removeIpCount.Add(1)
+	m.updateChan <- struct{}{}
+	return err
+}
+
+func (m *WaitingMockPoolService) isCountReached() bool {
+	return m.deletePoolCount.Load() == m.deletePoolExpected &&
+		m.getNextIpCount.Load() == m.getNextIpExpected &&
+		m.removeIpCount.Load() == m.removeIpExpected
+}
+
+func (m *WaitingMockPoolService) Wait(timeout time.Duration) {
+	timeoutChan := time.After(timeout)
+	for {
+		select {
+		case <-m.updateChan:
+			if m.isCountReached() {
+				return
+			}
+		case <-timeoutChan:
+			m.t.Fatalf("WaitingMockWireguardPeersRepository wait timeout")
+			return
+		}
+	}
+
+}
