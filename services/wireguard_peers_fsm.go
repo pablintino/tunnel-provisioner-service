@@ -127,7 +127,7 @@ func (a *peerFsmProvisionAction) provisionPeerWithoutKey(peer *models.WireguardP
 		}
 
 		_, err = provider.CreatePeer(kp.PublicKey, peer.Description, peer.PreSharedKey, tunnelInfo, tunnelProfileInfo, peer.Ip)
-		if err != nil && routerOSResourceAlreadyExistsError(routerOSRetrieveApiErrorMessage(err)) {
+		if err != nil && errors.Is(ErrProviderPeerAlreadyExists, err) {
 			// Key already exists
 			continue
 		} else if err != nil {
