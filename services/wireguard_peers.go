@@ -50,10 +50,6 @@ type wireguardDeletionTask struct {
 	TunnelInfo models.WireguardTunnelInfo
 }
 
-type wireguardUnprovisionInterfacePeersTask struct {
-	TunnelInfo models.WireguardTunnelInfo
-}
-
 type wireguardSyncTask struct{}
 
 func NewWireguardPeersService(
@@ -193,8 +189,6 @@ loop:
 				u.handleWireguardCreationTask(p)
 			case wireguardDeletionTask:
 				u.handleWireguardDeletionTask(p)
-			case wireguardUnprovisionInterfacePeersTask:
-				u.handleWireguardUnprovisionInterfacePeersTask(p)
 			case wireguardSyncTask:
 				u.handleWireguardSyncTask()
 			default:
@@ -238,27 +232,6 @@ func (u *WireguardPeersServiceImpl) handleWireguardSyncTask() {
 			u.sendEventToPeerFsm(peerFsmEventUnprovision, peer)
 		} else {
 			u.sendEventToPeerFsm(peerFsmEventProvision, peer)
-		}
-	}
-}
-
-func (u *WireguardPeersServiceImpl) handleWireguardUnprovisionInterfacePeersTask(task wireguardUnprovisionInterfacePeersTask) {
-
-	tunnelPeers, err := u.wireguardPeersRepository.GetPeersByTunnelId(task.TunnelInfo.Id)
-	if err != nil {
-		logging.Logger.Errorw(
-			"task failed to get peers for tunnel",
-			"provider", task.TunnelInfo.Provider,
-			"interface", task.TunnelInfo.Interface.Name,
-			"tunnel", task.TunnelInfo,
-			"error", err.Error(),
-		)
-		return
-	}
-
-	for _, peer := range tunnelPeers {
-		if peer.State == models.ProvisionStateProvisioned {
-			u.sendEventToPeerFsm(peerFsmEventUnprovision, peer)
 		}
 	}
 }

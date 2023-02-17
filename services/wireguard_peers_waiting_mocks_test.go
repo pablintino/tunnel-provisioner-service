@@ -152,6 +152,10 @@ func (m *WaitingMockWireguardPeersRepository) isCountReached() bool {
 }
 
 func (m *WaitingMockWireguardPeersRepository) Wait(timeout time.Duration) {
+	if m.isCountReached() {
+		// Usually,if waiting for a non-configured mock
+		return
+	}
 	timeoutChan := time.After(timeout)
 	for {
 		select {
@@ -160,11 +164,12 @@ func (m *WaitingMockWireguardPeersRepository) Wait(timeout time.Duration) {
 				return
 			}
 		case <-timeoutChan:
-			m.t.Fatalf("WaitingMockWireguardPeersRepository wait timeout")
+			if !m.isCountReached() {
+				m.t.Fatalf("WaitingMockWireguardPeersRepository wait timeout")
+			}
 			return
 		}
 	}
-
 }
 
 type WaitingMockPoolService struct {
@@ -240,6 +245,10 @@ func (m *WaitingMockPoolService) isCountReached() bool {
 }
 
 func (m *WaitingMockPoolService) Wait(timeout time.Duration) {
+	if m.isCountReached() {
+		// Usually,if waiting for a non-configured mock
+		return
+	}
 	timeoutChan := time.After(timeout)
 	for {
 		select {
@@ -248,9 +257,10 @@ func (m *WaitingMockPoolService) Wait(timeout time.Duration) {
 				return
 			}
 		case <-timeoutChan:
-			m.t.Fatalf("WaitingMockPoolService wait timeout")
+			if !m.isCountReached() {
+				m.t.Fatalf("WaitingMockPoolService wait timeout")
+			}
 			return
 		}
 	}
-
 }
