@@ -71,6 +71,9 @@ func (m *WaitingMockWireguardPeersRepository) EXPECT() *MockWireguardPeersReposi
 
 func (m *WaitingMockWireguardPeersRepository) GetPeersByUsername(username string) ([]*models.WireguardPeerModel, error) {
 	val, err := m.mock.GetPeersByUsername(username)
+	if m.getPeersByUsernameExpected == 0 {
+		m.t.Fatalf("call to GetPeersByUsername not expected")
+	}
 	m.getPeersByUsernameCount.Add(1)
 	m.updateChan <- struct{}{}
 	return val, err
@@ -78,6 +81,9 @@ func (m *WaitingMockWireguardPeersRepository) GetPeersByUsername(username string
 
 func (m *WaitingMockWireguardPeersRepository) GetPeersByTunnelId(tunnelId string) ([]*models.WireguardPeerModel, error) {
 	val, err := m.mock.GetPeersByTunnelId(tunnelId)
+	if m.getPeersByTunnelIdExpected == 0 {
+		m.t.Fatalf("call to GetPeersByTunnelId not expected")
+	}
 	m.getPeersByTunnelIdCount.Add(1)
 	m.updateChan <- struct{}{}
 	return val, err
@@ -85,6 +91,9 @@ func (m *WaitingMockWireguardPeersRepository) GetPeersByTunnelId(tunnelId string
 
 func (m *WaitingMockWireguardPeersRepository) GetPeerById(username, id string) (*models.WireguardPeerModel, error) {
 	val, err := m.mock.GetPeerById(username, id)
+	if m.getPeerByIdExpected == 0 {
+		m.t.Fatalf("call to GetPeerById not expected")
+	}
 	m.getPeerByIdCount.Add(1)
 	m.updateChan <- struct{}{}
 	return val, err
@@ -92,6 +101,9 @@ func (m *WaitingMockWireguardPeersRepository) GetPeerById(username, id string) (
 
 func (m *WaitingMockWireguardPeersRepository) SavePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error) {
 	val, err := m.mock.SavePeer(peer)
+	if m.savePeerExpected == 0 {
+		m.t.Fatalf("call to SavePeer not expected")
+	}
 	m.savePeerCount.Add(1)
 	m.updateChan <- struct{}{}
 	return val, err
@@ -99,6 +111,9 @@ func (m *WaitingMockWireguardPeersRepository) SavePeer(peer *models.WireguardPee
 
 func (m *WaitingMockWireguardPeersRepository) UpdatePeer(peer *models.WireguardPeerModel) (*models.WireguardPeerModel, error) {
 	val, err := m.mock.UpdatePeer(peer)
+	if m.updatePeerExpected == 0 {
+		m.t.Fatalf("call to UpdatePeer not expected")
+	}
 	m.updatePeerCount.Add(1)
 	m.updateChan <- struct{}{}
 	return val, err
@@ -106,6 +121,9 @@ func (m *WaitingMockWireguardPeersRepository) UpdatePeer(peer *models.WireguardP
 
 func (m *WaitingMockWireguardPeersRepository) GetAll() ([]*models.WireguardPeerModel, error) {
 	val, err := m.mock.GetAll()
+	if m.getAllExpected == 0 {
+		m.t.Fatalf("call to GetAll not expected")
+	}
 	m.getAllCount.Add(1)
 	m.updateChan <- struct{}{}
 	return val, err
@@ -113,6 +131,9 @@ func (m *WaitingMockWireguardPeersRepository) GetAll() ([]*models.WireguardPeerM
 
 func (m *WaitingMockWireguardPeersRepository) DeletePeer(peer *models.WireguardPeerModel) error {
 	err := m.mock.DeletePeer(peer)
+	if m.deletePeerExpected == 0 {
+		m.t.Fatalf("call to DeletePeer not expected")
+	}
 	m.deletePeerCount.Add(1)
 	m.updateChan <- struct{}{}
 	return err
@@ -184,6 +205,9 @@ func (m *WaitingMockPoolService) SetRemoveIpExpected(expected uint32) {
 
 func (m *WaitingMockPoolService) DeletePool(tunnel *models.WireguardTunnelInfo) error {
 	err := m.mock.DeletePool(tunnel)
+	if m.deletePoolExpected == 0 {
+		m.t.Fatalf("call to DeletePool not expected")
+	}
 	m.deletePoolCount.Add(1)
 	m.updateChan <- struct{}{}
 	return err
@@ -191,6 +215,9 @@ func (m *WaitingMockPoolService) DeletePool(tunnel *models.WireguardTunnelInfo) 
 
 func (m *WaitingMockPoolService) GetNextIp(tunnel *models.WireguardTunnelInfo) (net.IP, error) {
 	val, err := m.mock.GetNextIp(tunnel)
+	if m.getNextIpExpected == 0 {
+		m.t.Fatalf("call to GetNextIp not expected")
+	}
 	m.getNextIpCount.Add(1)
 	m.updateChan <- struct{}{}
 	return val, err
@@ -198,6 +225,9 @@ func (m *WaitingMockPoolService) GetNextIp(tunnel *models.WireguardTunnelInfo) (
 
 func (m *WaitingMockPoolService) RemoveIp(tunnel *models.WireguardTunnelInfo, ip net.IP) error {
 	err := m.mock.RemoveIp(tunnel, ip)
+	if m.removeIpExpected == 0 {
+		m.t.Fatalf("call to RemoveIp not expected")
+	}
 	m.removeIpCount.Add(1)
 	m.updateChan <- struct{}{}
 	return err
@@ -218,7 +248,7 @@ func (m *WaitingMockPoolService) Wait(timeout time.Duration) {
 				return
 			}
 		case <-timeoutChan:
-			m.t.Fatalf("WaitingMockWireguardPeersRepository wait timeout")
+			m.t.Fatalf("WaitingMockPoolService wait timeout")
 			return
 		}
 	}

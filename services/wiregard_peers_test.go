@@ -96,6 +96,8 @@ type peersFsmMockedEntities struct {
 	peersService                 *services.WireguardPeersServiceImpl
 	tunnelInfo                   models.WireguardTunnelInfo
 	profileInfo                  models.WireguardTunnelProfileInfo
+	userList                     []models.User
+	userMap                      map[string]models.User
 }
 
 func newPeersFsmMockedEntities(t *testing.T) *peersFsmMockedEntities {
@@ -110,6 +112,15 @@ func newPeersFsmMockedEntities(t *testing.T) *peersFsmMockedEntities {
 	const providerName = "routeros"
 	providerMap := map[string]services.WireguardTunnelProvider{
 		providerName: entities.wireguardProviderMock,
+	}
+
+	entities.userMap = map[string]models.User{
+		"test-user-1": {Username: "test-user-1", Email: "testuser1@test.com"},
+		"test-user-2": {Username: "test-user-2", Email: "testuser2@test.com"},
+	}
+
+	for _, u := range entities.userMap {
+		entities.userList = append(entities.userList, u)
 	}
 
 	entities.peersService = services.NewWireguardPeersService(
@@ -228,6 +239,7 @@ func TestWireguardPeersServiceImplCreatePeer(t *testing.T) {
 	// Wait till state goes to provisioned
 	entities.wireguardPeersRepositoryMock.SetUpdatePeerExpected(3)
 	entities.wireguardPeersRepositoryMock.SetSavePeerExpected(1)
+	entities.poolServiceMock.SetGetNextIpExpected(1)
 
 	// Call method under test
 	result, err := entities.peersService.CreatePeer(
@@ -314,6 +326,232 @@ func TestWireguardPeersServiceImplDeleteProvisionedPeer(t *testing.T) {
 	assert.Nil(t, err)
 
 	// Wait till last update is done
+	entities.wireguardPeersRepositoryMock.Wait(time.Second * 2)
+	entities.poolServiceMock.Wait(time.Second * 2)
+}
+
+func TestWireguardPeersServiceImplSyncProvisionedPeer(t *testing.T) {
+	logging.Initialize(false)
+	defer logging.Release()
+
+	entities := newPeersFsmMockedEntities(t)
+
+	entities.usersServiceMock.EXPECT().GetUsers().Return(entities.userMap, nil)
+
+	initialProvisonedPeer := &models.WireguardPeerModel{
+		Id:           primitive.NewObjectID(),
+		Username:     entities.userList[0].Username,
+		Description:  "description",
+		PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
+		PublicKey:    "test-public-key",
+		State:        models.ProvisionStateProvisioned,
+		ProfileId:    entities.profileInfo.Id,
+		TunnelId:     entities.tunnelInfo.Id,
+		Ip:           net.IPv4(192, 168, 177, 2),
+		CreationTime: time.Now(),
+	}
+	entities.wireguardPeersRepositoryMock.EXPECT().GetAll().Return([]*models.WireguardPeerModel{initialProvisonedPeer}, nil)
+	entities.tunnelsServiceMock.EXPECT().GetTunnels().Return(map[string]models.WireguardTunnelInfo{entities.tunnelInfo.Id: entities.tunnelInfo})
+
+	entities.tunnelsServiceMock.EXPECT().
+		GetTunnelConfigById(gomock.Eq(entities.tunnelInfo.Id), gomock.Eq(entities.profileInfo.Id)).
+		Return(entities.tunnelInfo, entities.profileInfo, nil).
+		MaxTimes(1)
+
+	providerPeer := &services.WireguardProviderPeer{
+		PublicKey:      initialProvisonedPeer.PublicKey,
+		Disabled:       false,
+		Id:             "*1D",
+		Description:    initialProvisonedPeer.Description,
+		AllowedAddress: entities.profileInfo.Ranges,
+	}
+	entities.wireguardProviderMock.EXPECT().
+		GetPeerByPublicKey(gomock.Eq(initialProvisonedPeer.PublicKey), gomock.Eq(&entities.tunnelInfo)).
+		Return(providerPeer, nil)
+
+	entities.wireguardProviderMock.EXPECT().
+		UpdatePeer(
+			gomock.Eq(providerPeer.Id),
+			gomock.Eq(initialProvisonedPeer.PublicKey),
+			gomock.Eq(initialProvisonedPeer.Description),
+			gomock.Eq(initialProvisonedPeer.PreSharedKey),
+			gomock.Eq(&entities.tunnelInfo),
+			gomock.Eq(&entities.profileInfo),
+			gomock.Eq(initialProvisonedPeer.Ip),
+		).
+		Return(nil)
+
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		UpdatePeer(NewPeerMatcher(initialProvisonedPeer, t, false, false, false, false)).
+		Return(initialProvisonedPeer, nil)
+
+	entities.wireguardPeersRepositoryMock.SetUpdatePeerExpected(1)
+	entities.wireguardPeersRepositoryMock.SetGetAllExpected(1)
+
+	entities.peersService.SyncPeers()
+
+	// Wait till last update is done
+	entities.wireguardPeersRepositoryMock.Wait(time.Second * 2)
+}
+
+func TestWireguardPeersServiceImplSyncUnprovisionedPeer(t *testing.T) {
+	logging.Initialize(false)
+	defer logging.Release()
+
+	entities := newPeersFsmMockedEntities(t)
+
+	entities.usersServiceMock.EXPECT().GetUsers().Return(entities.userMap, nil)
+
+	initialUnprovisonedPeer := &models.WireguardPeerModel{
+		Id:           primitive.NewObjectID(),
+		Username:     entities.userList[0].Username,
+		Description:  "description",
+		PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
+		PublicKey:    "test-public-key",
+		State:        models.ProvisionStateUnprovisioned,
+		ProfileId:    entities.profileInfo.Id,
+		TunnelId:     entities.tunnelInfo.Id,
+		Ip:           net.IPv4(192, 168, 177, 2),
+		CreationTime: time.Now(),
+	}
+	entities.wireguardPeersRepositoryMock.EXPECT().GetAll().Return([]*models.WireguardPeerModel{initialUnprovisonedPeer}, nil)
+	entities.tunnelsServiceMock.EXPECT().GetTunnels().Return(map[string]models.WireguardTunnelInfo{entities.tunnelInfo.Id: entities.tunnelInfo})
+
+	entities.tunnelsServiceMock.EXPECT().
+		GetTunnelConfigById(gomock.Eq(entities.tunnelInfo.Id), gomock.Eq(entities.profileInfo.Id)).
+		Return(entities.tunnelInfo, entities.profileInfo, nil).
+		AnyTimes()
+
+	// First state update from Unprovisioned to provisioning
+	provisioningPeer := &models.WireguardPeerModel{
+		Id:           initialUnprovisonedPeer.Id,
+		Username:     initialUnprovisonedPeer.Username,
+		Description:  initialUnprovisonedPeer.Description,
+		PreSharedKey: initialUnprovisonedPeer.PreSharedKey,
+		PublicKey:    initialUnprovisonedPeer.PublicKey,
+		State:        models.ProvisionStateProvisioning,
+		ProfileId:    initialUnprovisonedPeer.ProfileId,
+		TunnelId:     initialUnprovisonedPeer.TunnelId,
+		Ip:           initialUnprovisonedPeer.Ip,
+		CreationTime: initialUnprovisonedPeer.CreationTime,
+	}
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		UpdatePeer(NewPeerMatcher(provisioningPeer, t, false, false, false, false)).
+		Return(provisioningPeer, nil)
+
+	providerPeer := &services.WireguardProviderPeer{
+		PublicKey:      initialUnprovisonedPeer.PublicKey,
+		Disabled:       false,
+		Id:             "*1D",
+		Description:    initialUnprovisonedPeer.Description,
+		AllowedAddress: entities.profileInfo.Ranges,
+	}
+	entities.wireguardProviderMock.EXPECT().
+		GetPeerByPublicKey(gomock.Eq(initialUnprovisonedPeer.PublicKey), gomock.Eq(&entities.tunnelInfo)).
+		Return(providerPeer, nil)
+
+	entities.wireguardProviderMock.EXPECT().
+		UpdatePeer(
+			gomock.Eq(providerPeer.Id),
+			gomock.Eq(initialUnprovisonedPeer.PublicKey),
+			gomock.Eq(initialUnprovisonedPeer.Description),
+			gomock.Eq(initialUnprovisonedPeer.PreSharedKey),
+			gomock.Eq(&entities.tunnelInfo),
+			gomock.Eq(&entities.profileInfo),
+			gomock.Eq(initialUnprovisonedPeer.Ip),
+		).
+		Return(nil)
+
+	// Last state update from Provisioning to provisioned
+	provisionedPeer := &models.WireguardPeerModel{
+		Id:           provisioningPeer.Id,
+		Username:     provisioningPeer.Username,
+		Description:  provisioningPeer.Description,
+		PreSharedKey: provisioningPeer.PreSharedKey,
+		PublicKey:    provisioningPeer.PublicKey,
+		State:        models.ProvisionStateProvisioned,
+		ProfileId:    provisioningPeer.ProfileId,
+		TunnelId:     provisioningPeer.TunnelId,
+		Ip:           provisioningPeer.Ip,
+		CreationTime: provisioningPeer.CreationTime,
+	}
+
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		UpdatePeer(NewPeerMatcher(provisionedPeer, t, false, false, false, false)).
+		Return(provisionedPeer, nil)
+
+	entities.wireguardPeersRepositoryMock.SetUpdatePeerExpected(2)
+	entities.wireguardPeersRepositoryMock.SetGetAllExpected(1)
+
+	entities.peersService.SyncPeers()
+
+	// Wait till last update is done
+	entities.wireguardPeersRepositoryMock.Wait(time.Second * 2)
+}
+
+func TestWireguardPeersServiceImplSyncDeletePeer(t *testing.T) {
+	logging.Initialize(false)
+	defer logging.Release()
+
+	entities := newPeersFsmMockedEntities(t)
+
+	entities.usersServiceMock.EXPECT().GetUsers().Return(entities.userMap, nil)
+
+	initialUnprovisonedPeer := &models.WireguardPeerModel{
+		Id:           primitive.NewObjectID(),
+		Username:     "non-existing-user",
+		Description:  "description",
+		PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
+		PublicKey:    "test-public-key",
+		State:        models.ProvisionStateProvisioned,
+		ProfileId:    entities.profileInfo.Id,
+		TunnelId:     entities.tunnelInfo.Id,
+		Ip:           net.IPv4(192, 168, 177, 2),
+		CreationTime: time.Now(),
+	}
+	entities.wireguardPeersRepositoryMock.EXPECT().GetAll().Return([]*models.WireguardPeerModel{initialUnprovisonedPeer}, nil)
+	entities.tunnelsServiceMock.EXPECT().GetTunnels().Return(map[string]models.WireguardTunnelInfo{entities.tunnelInfo.Id: entities.tunnelInfo})
+
+	entities.tunnelsServiceMock.EXPECT().
+		GetTunnelConfigById(gomock.Eq(entities.tunnelInfo.Id), gomock.Eq(entities.profileInfo.Id)).
+		Return(entities.tunnelInfo, entities.profileInfo, nil).
+		AnyTimes()
+
+	// First state update from Provisioned to deleting
+	deletingPeer := &models.WireguardPeerModel{
+		Id:           initialUnprovisonedPeer.Id,
+		Username:     initialUnprovisonedPeer.Username,
+		Description:  initialUnprovisonedPeer.Description,
+		PreSharedKey: initialUnprovisonedPeer.PreSharedKey,
+		PublicKey:    initialUnprovisonedPeer.PublicKey,
+		State:        models.ProvisionStateDeleting,
+		ProfileId:    initialUnprovisonedPeer.ProfileId,
+		TunnelId:     initialUnprovisonedPeer.TunnelId,
+		Ip:           initialUnprovisonedPeer.Ip,
+		CreationTime: initialUnprovisonedPeer.CreationTime,
+	}
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		UpdatePeer(NewPeerMatcher(deletingPeer, t, false, false, false, false)).
+		Return(deletingPeer, nil)
+
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		DeletePeer(NewPeerMatcher(deletingPeer, t, false, false, false, false)).
+		Return(nil)
+
+	entities.wireguardProviderMock.EXPECT().
+		DeletePeerByPublicKey(gomock.Eq(&entities.tunnelInfo), gomock.Eq(deletingPeer.PublicKey)).
+		Return(nil)
+
+	entities.poolServiceMock.EXPECT().RemoveIp(gomock.Eq(&entities.tunnelInfo), gomock.Eq(deletingPeer.Ip)).Return(nil)
+
+	entities.wireguardPeersRepositoryMock.SetUpdatePeerExpected(1)
+	entities.wireguardPeersRepositoryMock.SetDeletePeerExpected(1)
+	entities.wireguardPeersRepositoryMock.SetGetAllExpected(1)
+	entities.poolServiceMock.SetRemoveIpExpected(1)
+
+	entities.peersService.SyncPeers()
+
+	// Wait mock calls
 	entities.wireguardPeersRepositoryMock.Wait(time.Second * 2)
 	entities.poolServiceMock.Wait(time.Second * 2)
 }
