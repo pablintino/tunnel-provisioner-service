@@ -33,28 +33,56 @@ func (m *WaitingMockWireguardPeersRepository) SetGetPeersByUsernameExpected(expe
 	m.getPeersByUsernameExpected = expected
 }
 
+func (m *WaitingMockWireguardPeersRepository) IncGetPeersByUsernameExpected() {
+	m.getPeersByUsernameExpected++
+}
+
 func (m *WaitingMockWireguardPeersRepository) SetGetPeersByTunnelIdExpected(expected uint32) {
 	m.getPeersByTunnelIdExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) IncGetPeersByTunnelIdExpected() {
+	m.getPeersByTunnelIdExpected++
 }
 
 func (m *WaitingMockWireguardPeersRepository) SetGetPeerByIdExpected(expected uint32) {
 	m.getPeerByIdExpected = expected
 }
 
+func (m *WaitingMockWireguardPeersRepository) IncGetPeerByIdExpected() {
+	m.getPeerByIdExpected++
+}
+
 func (m *WaitingMockWireguardPeersRepository) SetSavePeerExpected(expected uint32) {
 	m.savePeerExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) IncSavePeerExpected() {
+	m.savePeerExpected++
 }
 
 func (m *WaitingMockWireguardPeersRepository) SetUpdatePeerExpected(expected uint32) {
 	m.updatePeerExpected = expected
 }
 
+func (m *WaitingMockWireguardPeersRepository) IncUpdatePeerExpected() {
+	m.updatePeerExpected++
+}
+
 func (m *WaitingMockWireguardPeersRepository) SetDeletePeerExpected(expected uint32) {
 	m.deletePeerExpected = expected
 }
 
+func (m *WaitingMockWireguardPeersRepository) IncDeletePeerExpected() {
+	m.deletePeerExpected++
+}
+
 func (m *WaitingMockWireguardPeersRepository) SetGetAllExpected(expected uint32) {
 	m.getAllExpected = expected
+}
+
+func (m *WaitingMockWireguardPeersRepository) IncGetAllExpected() {
+	m.getAllExpected++
 }
 
 func NewWaitingMockWireguardPeersRepository(ctrl *gomock.Controller, t *testing.T) *WaitingMockWireguardPeersRepository {

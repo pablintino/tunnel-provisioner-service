@@ -87,7 +87,7 @@ func (a *peerFsmProvisioningAction) Execute(_ utils.EventContext) utils.EventTyp
 		return a.sendToError(err)
 	}
 
-	if a.peer.Ip.IsUnspecified() {
+	if a.peer.Ip == nil || a.peer.Ip.IsUnspecified() {
 		a.peer.Ip, err = a.peersService.poolService.GetNextIp(&tunnelInfo)
 		if err == nil {
 			_, err = a.peersService.wireguardPeersRepository.UpdatePeer(a.peer)
