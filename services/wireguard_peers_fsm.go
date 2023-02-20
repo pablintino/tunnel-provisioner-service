@@ -306,6 +306,9 @@ func newPeerFsm(peer *models.WireguardPeerModel, peersService *WireguardPeersSer
 
 				/* Evt. Error: Created -> Error */
 				peerFsmEventError: utils.FSMTransition{Action: &peerFsmErrorAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateError},
+
+				/* Evt. Force Delete: Created-> Deleted */
+				peerFsmEventForceDelete: utils.FSMTransition{Action: &peerFsmForceDeleteAction{baseFsmAction{peer: peer, peersService: peersService}}, Target: models.ProvisionStateDeleted},
 			},
 			models.ProvisionStateUnprovisioned: utils.FSMEventTransitions{
 				/* Evt. Provision: Unprovisioned -> Provisioning */
