@@ -1,7 +1,6 @@
 package services_test
 
 import (
-	"fmt"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -39,56 +38,6 @@ func (e AnyWgKeyMatcher) String() string {
 	return "is a wg key "
 }
 
-type PeerMatcher struct {
-	x                  *models.WireguardPeerModel
-	t                  *testing.T
-	ignorePublickey    bool
-	ignorePrivatekey   bool
-	ignoreCreationTime bool
-	ignoreId           bool
-	withIp             net.IP
-}
-
-// TODO. This is a non-go CHANGE IT
-func NewPeerMatcher(x *models.WireguardPeerModel, t *testing.T, ignorePublickey, ignorePrivatekey, ignoreCreationTime, ignoreId bool, withIp net.IP) PeerMatcher {
-	return PeerMatcher{x: x, t: t, ignorePublickey: ignorePublickey, ignorePrivatekey: ignorePrivatekey, ignoreCreationTime: ignoreCreationTime, ignoreId: ignoreId, withIp: withIp}
-}
-
-func (e PeerMatcher) Matches(x interface{}) bool {
-	// In case, some value is nil
-	if e.x == nil || x == nil {
-		return reflect.DeepEqual(e.x, x)
-	}
-
-	// Check if types assignable and convert them to common type
-	xVal, ok := reflect.ValueOf(x).Interface().(*models.WireguardPeerModel)
-	if !ok {
-		e.t.Fatal("Cannot cast mock arguments to a WireguardPeerModel")
-		return false
-	}
-
-	if xVal.PreSharedKey != e.x.PreSharedKey ||
-		xVal.Description != e.x.Description ||
-		xVal.Username != e.x.Username ||
-		xVal.TunnelId != e.x.TunnelId ||
-		xVal.ProfileId != e.x.ProfileId ||
-		xVal.ProvisionStatus != e.x.ProvisionStatus ||
-		xVal.State != e.x.State ||
-		((e.withIp == nil && !e.x.Ip.Equal(xVal.Ip)) || (e.withIp != nil && !e.withIp.Equal(xVal.Ip))) ||
-		(!e.ignoreId && (xVal.Id.Hex() != e.x.Id.Hex())) ||
-		(!e.ignoreCreationTime && (!xVal.CreationTime.Equal(e.x.CreationTime))) ||
-		(!e.ignorePublickey && (xVal.PublicKey != e.x.PublicKey)) ||
-		(!e.ignorePrivatekey && (xVal.PrivateKey != e.x.PrivateKey)) {
-		return false
-	}
-
-	return true
-}
-
-func (e PeerMatcher) String() string {
-	return fmt.Sprintf("is equal to %v (%T)", e.x, e.x)
-}
-
 type testServices struct {
 	wireguardPeersRepositoryMock *WaitingMockWireguardPeersRepository
 	usersServiceMock             *MockUsersService
@@ -121,11 +70,13 @@ func newTestServices(t *testing.T, testDummyEntities *dummyEntities) *testServic
 }
 
 type dummyEntities struct {
-	tunnelInfo  models.WireguardTunnelInfo
-	profileInfo models.WireguardTunnelProfileInfo
-	userList    []models.User
-	userMap     map[string]models.User
-	peerIp      net.IP
+	tunnelInfo     models.WireguardTunnelInfo
+	profileInfo    models.WireguardTunnelProfileInfo
+	userList       []models.User
+	userMap        map[string]models.User
+	peerIp         net.IP
+	peerPrivateKey string
+	peerPublicKey  string
 }
 
 func newPeersDummyEntities() *dummyEntities {
@@ -155,6 +106,11 @@ func newPeersDummyEntities() *dummyEntities {
 		Provider:  providerName,
 		Interface: models.WireguardInterfaceModel{Name: "test-interface", Present: true, Provider: providerName},
 	}
+
+	key, _ := wgtypes.GeneratePrivateKey()
+	testDummyEntities.peerPrivateKey = key.String()
+	testDummyEntities.peerPublicKey = key.PublicKey().String()
+
 	return testDummyEntities
 }
 
@@ -182,7 +138,7 @@ func TestWireguardPeersServiceImplCreatePeer(t *testing.T) {
 		CreationTime: time.Now(),
 	}
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		SavePeer(NewPeerMatcher(mockedSavedPeer, t, false, false, true, true, nil)).
+		SavePeer(NewIgnoreIdAndCreationTimePeerMatcher(t, mockedSavedPeer)).
 		Return(mockedSavedPeer, nil)
 
 	peerIp := net.IPv4(192, 168, 177, 2)
@@ -192,7 +148,7 @@ func TestWireguardPeersServiceImplCreatePeer(t *testing.T) {
 	updatePeerResponseIpSave := *mockedSavedPeer
 	updatePeerResponseIpSave.Ip = peerIp
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewPeerMatcher(&updatePeerResponseIpSave, t, false, false, false, false, nil)).
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &updatePeerResponseIpSave)).
 		Return(&updatePeerResponseIpSave, nil)
 
 	/* REPOSITORY: Prepare intermediate update as PROVISIONING */
@@ -200,7 +156,7 @@ func TestWireguardPeersServiceImplCreatePeer(t *testing.T) {
 	updatePeerResponseProvisioningSave.State = models.ProvisionStateProvisioning
 
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewPeerMatcher(&updatePeerResponseProvisioningSave, t, false, false, false, false, nil)).
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &updatePeerResponseProvisioningSave)).
 		Return(&updatePeerResponseProvisioningSave, nil)
 
 	/* REPOSITORY: Prepare last Update for final save as PROVISIONED */
@@ -208,7 +164,7 @@ func TestWireguardPeersServiceImplCreatePeer(t *testing.T) {
 	updatePeerResponseProvisionedSave.State = models.ProvisionStateProvisioned
 
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewPeerMatcher(&updatePeerResponseProvisionedSave, t, true, true, false, false, nil)).
+		UpdatePeer(NewIgnoreKeysPeerMatcher(t, &updatePeerResponseProvisionedSave).Add(NewPeerIpMatcher(peerIp))).
 		Return(&updatePeerResponseProvisionedSave, nil)
 
 	/* PROVIDER: Prepare for CreatePeer call to provider */
@@ -265,7 +221,8 @@ func TestWireguardPeersServiceImplDeleteProvisionedPeer(t *testing.T) {
 		Username:     "test-username",
 		Description:  "description",
 		PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
-		PublicKey:    "test-public-key",
+		PublicKey:    testDummyEntities.peerPublicKey,
+		PrivateKey:   testDummyEntities.peerPrivateKey,
 		State:        models.ProvisionStateProvisioned,
 		ProfileId:    testDummyEntities.profileInfo.Id,
 		TunnelId:     testDummyEntities.tunnelInfo.Id,
@@ -284,11 +241,11 @@ func TestWireguardPeersServiceImplDeleteProvisionedPeer(t *testing.T) {
 	updatePeerResponseDeletingSave.State = models.ProvisionStateDeleting
 
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewPeerMatcher(&updatePeerResponseDeletingSave, t, false, false, false, false, nil)).
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &updatePeerResponseDeletingSave)).
 		Return(&updatePeerResponseDeletingSave, nil)
 
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		DeletePeer(NewPeerMatcher(&updatePeerResponseDeletingSave, t, false, false, false, false, nil)).
+		DeletePeer(NewAllMatchersPeerMatcher(t, &updatePeerResponseDeletingSave)).
 		Return(nil)
 
 	entities.poolServiceMock.EXPECT().RemoveIp(gomock.Eq(&testDummyEntities.tunnelInfo), gomock.Eq(initialProvisonedPeer.Ip)).Return(nil)
@@ -322,7 +279,8 @@ func TestWireguardPeersServiceImplSyncDeletePeer(t *testing.T) {
 		Username:     "non-existing-user",
 		Description:  "description",
 		PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
-		PublicKey:    "test-public-key",
+		PublicKey:    testDummyEntities.peerPublicKey,
+		PrivateKey:   testDummyEntities.peerPrivateKey,
 		State:        models.ProvisionStateProvisioned,
 		ProfileId:    testDummyEntities.profileInfo.Id,
 		TunnelId:     testDummyEntities.tunnelInfo.Id,
@@ -342,11 +300,11 @@ func TestWireguardPeersServiceImplSyncDeletePeer(t *testing.T) {
 	deletingPeer.State = models.ProvisionStateDeleting
 
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewPeerMatcher(&deletingPeer, t, false, false, false, false, nil)).
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &deletingPeer)).
 		Return(&deletingPeer, nil)
 
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		DeletePeer(NewPeerMatcher(&deletingPeer, t, false, false, false, false, nil)).
+		DeletePeer(NewAllMatchersPeerMatcher(t, &deletingPeer)).
 		Return(nil)
 
 	entities.wireguardProviderMock.EXPECT().
@@ -381,7 +339,8 @@ func TestWireguardPeersServiceImplSyncUnprovisionPeer(t *testing.T) {
 		Username:     testDummyEntities.userList[0].Username,
 		Description:  "description",
 		PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
-		PublicKey:    "test-public-key",
+		PublicKey:    testDummyEntities.peerPublicKey,
+		PrivateKey:   testDummyEntities.peerPrivateKey,
 		State:        models.ProvisionStateProvisioned,
 		ProfileId:    testDummyEntities.profileInfo.Id,
 		TunnelId:     testDummyEntities.tunnelInfo.Id,
@@ -404,7 +363,7 @@ func TestWireguardPeersServiceImplSyncUnprovisionPeer(t *testing.T) {
 	unprovisioningPeer.State = models.ProvisionStateUnprovisioning
 
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewPeerMatcher(&unprovisioningPeer, t, false, false, false, false, nil)).
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &unprovisioningPeer)).
 		Return(&unprovisioningPeer, nil)
 
 	entities.wireguardProviderMock.EXPECT().
@@ -415,7 +374,7 @@ func TestWireguardPeersServiceImplSyncUnprovisionPeer(t *testing.T) {
 	unprovisionedPeer := unprovisioningPeer
 	unprovisionedPeer.State = models.ProvisionStateUnprovisioned
 	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewPeerMatcher(&unprovisionedPeer, t, false, false, false, false, nil)).
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &unprovisionedPeer)).
 		Return(&unprovisionedPeer, nil)
 
 	entities.wireguardPeersRepositoryMock.SetUpdatePeerExpected(2)
@@ -477,7 +436,8 @@ func TestWireguardPeersServiceImplSyncForceDeletePeer(t *testing.T) {
 				Username:     testDummyEntities.userList[0].Username,
 				Description:  "description",
 				PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
-				PublicKey:    "test-public-key",
+				PublicKey:    testDummyEntities.peerPublicKey,
+				PrivateKey:   testDummyEntities.peerPrivateKey,
 				State:        scenario.initialPeerState,
 				ProfileId:    testDummyEntities.profileInfo.Id,
 				TunnelId:     testDummyEntities.tunnelInfo.Id,
@@ -496,7 +456,7 @@ func TestWireguardPeersServiceImplSyncForceDeletePeer(t *testing.T) {
 			services.poolServiceMock.EXPECT().RemoveIp(gomock.Eq(&testDummyEntities.tunnelInfo), gomock.Eq(initialProvisonedPeer.Ip)).Return(nil)
 
 			services.wireguardPeersRepositoryMock.EXPECT().
-				DeletePeer(NewPeerMatcher(initialProvisonedPeer, t, false, false, false, false, nil)).
+				DeletePeer(NewAllMatchersPeerMatcher(t, initialProvisonedPeer)).
 				Return(nil)
 
 			services.wireguardPeersRepositoryMock.SetDeletePeerExpected(1)
@@ -561,8 +521,8 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				State:        models.ProvisionStateError,
 				TunnelId:     testDummyEntities.tunnelInfo.Id,
 				ProfileId:    testDummyEntities.profileInfo.Id,
-				PublicKey:    "RiKzVYkkW+7tK8PC12jH5iYP0IQSX0Wk03GPsmECb1E=",
-				PrivateKey:   "OEp/WBwUQ5IM8xTM1jY/chTpX6cKWzJ5HgkcttsoDUo=",
+				PublicKey:    testDummyEntities.peerPublicKey,
+				PrivateKey:   testDummyEntities.peerPrivateKey,
 				CreationTime: time.Now(),
 			},
 			peerExistsInRemote: false,
@@ -577,8 +537,8 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				State:        models.ProvisionStateUnprovisioned,
 				TunnelId:     testDummyEntities.tunnelInfo.Id,
 				ProfileId:    testDummyEntities.profileInfo.Id,
-				PublicKey:    "RiKzVYkkW+7tK8PC12jH5iYP0IQSX0Wk03GPsmECb1E=",
-				PrivateKey:   "OEp/WBwUQ5IM8xTM1jY/chTpX6cKWzJ5HgkcttsoDUo=",
+				PublicKey:    testDummyEntities.peerPublicKey,
+				PrivateKey:   testDummyEntities.peerPrivateKey,
 				CreationTime: time.Now(),
 			},
 			peerExistsInRemote: false,
@@ -623,8 +583,8 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				TunnelId:     testDummyEntities.tunnelInfo.Id,
 				ProfileId:    testDummyEntities.profileInfo.Id,
 				Ip:           testDummyEntities.peerIp, // Provisioning peers already has an IP
-				PublicKey:    "RiKzVYkkW+7tK8PC12jH5iYP0IQSX0Wk03GPsmECb1E=",
-				PrivateKey:   "OEp/WBwUQ5IM8xTM1jY/chTpX6cKWzJ5HgkcttsoDUo=",
+				PublicKey:    testDummyEntities.peerPublicKey,
+				PrivateKey:   testDummyEntities.peerPrivateKey,
 				CreationTime: time.Now(),
 			},
 			peerExistsInRemote: true,
@@ -640,8 +600,8 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				TunnelId:     testDummyEntities.tunnelInfo.Id,
 				ProfileId:    testDummyEntities.profileInfo.Id,
 				Ip:           testDummyEntities.peerIp, // Provisioning peers already has an IP
-				PublicKey:    "RiKzVYkkW+7tK8PC12jH5iYP0IQSX0Wk03GPsmECb1E=",
-				PrivateKey:   "OEp/WBwUQ5IM8xTM1jY/chTpX6cKWzJ5HgkcttsoDUo=",
+				PublicKey:    testDummyEntities.peerPublicKey,
+				PrivateKey:   testDummyEntities.peerPrivateKey,
 				CreationTime: time.Now(),
 			},
 			peerExistsInRemote: false,
@@ -656,9 +616,9 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				State:        models.ProvisionStateProvisioned,
 				TunnelId:     testDummyEntities.tunnelInfo.Id,
 				ProfileId:    testDummyEntities.profileInfo.Id,
-				Ip:           testDummyEntities.peerIp,                       // Provisioned peers already has an IP
-				PublicKey:    "RiKzVYkkW+7tK8PC12jH5iYP0IQSX0Wk03GPsmECb1E=", // Always with keys if already provisioned
-				PrivateKey:   "OEp/WBwUQ5IM8xTM1jY/chTpX6cKWzJ5HgkcttsoDUo=",
+				Ip:           testDummyEntities.peerIp,        // Provisioned peers already has an IP
+				PublicKey:    testDummyEntities.peerPublicKey, // Always with keys if already provisioned
+				PrivateKey:   testDummyEntities.peerPrivateKey,
 				CreationTime: time.Now(),
 			},
 			peerExistsInRemote: false,
@@ -673,9 +633,9 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				State:        models.ProvisionStateProvisioned,
 				TunnelId:     testDummyEntities.tunnelInfo.Id,
 				ProfileId:    testDummyEntities.profileInfo.Id,
-				Ip:           testDummyEntities.peerIp,                       // Provisioned peers already has an IP
-				PublicKey:    "RiKzVYkkW+7tK8PC12jH5iYP0IQSX0Wk03GPsmECb1E=", // Always with keys if already provisioned
-				PrivateKey:   "OEp/WBwUQ5IM8xTM1jY/chTpX6cKWzJ5HgkcttsoDUo=",
+				Ip:           testDummyEntities.peerIp,        // Provisioned peers already has an IP
+				PublicKey:    testDummyEntities.peerPublicKey, // Always with keys if already provisioned
+				PrivateKey:   testDummyEntities.peerPrivateKey,
 				CreationTime: time.Now(),
 			},
 			peerExistsInRemote: false,
@@ -735,13 +695,9 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				// Intermediate save after acquiring an IP
 				ipSavePeer := *scenario.initialPeer
 				ipSavePeer.Ip = peerIp
+
 				wireguardPeersRepositoryMock.EXPECT().
-					UpdatePeer(NewPeerMatcher(&ipSavePeer, t,
-						// Ignore keys if starting from a peer without key // TODO Improve to check that a key is passed, ignoring it is a too much simple approach
-						len(scenario.initialPeer.PublicKey) == 0,
-						len(scenario.initialPeer.PrivateKey) == 0,
-						false,
-						false, peerIp)).
+					UpdatePeer(NewAllMatchersPeerMatcher(t, &ipSavePeer)).
 					Return(&ipSavePeer, nil)
 				wireguardPeersRepositoryMock.IncUpdatePeerExpected()
 			}
@@ -793,28 +749,34 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				// Peer should pass PROVISIONING before getting PROVISIONED
 				intermediatePeer := *scenario.initialPeer
 				intermediatePeer.State = models.ProvisionStateProvisioning
-				wireguardPeersRepositoryMock.EXPECT().
-					UpdatePeer(NewPeerMatcher(&intermediatePeer, t,
-						// Ignore keys if starting from a peer without key // TODO Improve to check that a key is passed, ignoring it is a too much simple approach
-						len(scenario.initialPeer.PublicKey) == 0,
-						len(scenario.initialPeer.PrivateKey) == 0,
-						false,
-						false, peerIp)).
-					Return(&intermediatePeer, nil)
+				intermediatePeer.Ip = peerIp
+
+				intermediatePeerMatcher := NewIgnoreKeysPeerMatcher(t, &intermediatePeer)
+				if len(scenario.initialPeer.PublicKey) != 0 {
+					intermediatePeerMatcher.Add(NewPeerPublicKeyMatcher(scenario.initialPeer.PublicKey))
+				}
+				if len(scenario.initialPeer.PrivateKey) != 0 {
+					intermediatePeerMatcher.Add(NewPeerPrivateKeyMatcher(scenario.initialPeer.PrivateKey))
+				}
+
+				wireguardPeersRepositoryMock.EXPECT().UpdatePeer(intermediatePeerMatcher).Return(&intermediatePeer, nil)
 				wireguardPeersRepositoryMock.IncUpdatePeerExpected()
 			}
 
 			// Last update from PROVISIONING to PROVISIONED
 			lastPeer := *scenario.initialPeer
 			lastPeer.State = models.ProvisionStateProvisioned
-			wireguardPeersRepositoryMock.EXPECT().
-				UpdatePeer(NewPeerMatcher(&lastPeer, t,
-					// Ignore keys if starting from a peer without key // TODO Improve to check that a key is passed, ignoring it is a too much simple approach
-					len(scenario.initialPeer.PublicKey) == 0,
-					len(scenario.initialPeer.PrivateKey) == 0,
-					false,
-					false, peerIp)).
-				Return(&lastPeer, nil)
+			lastPeer.Ip = peerIp
+
+			lastPeerMatcher := NewIgnoreKeysPeerMatcher(t, &lastPeer)
+			if len(scenario.initialPeer.PublicKey) != 0 {
+				lastPeerMatcher.Add(NewPeerPublicKeyMatcher(scenario.initialPeer.PublicKey))
+			}
+			if len(scenario.initialPeer.PrivateKey) != 0 {
+				lastPeerMatcher.Add(NewPeerPrivateKeyMatcher(scenario.initialPeer.PrivateKey))
+			}
+
+			wireguardPeersRepositoryMock.EXPECT().UpdatePeer(lastPeerMatcher).Return(&lastPeer, nil)
 			wireguardPeersRepositoryMock.IncUpdatePeerExpected()
 
 			// Call the function under test
