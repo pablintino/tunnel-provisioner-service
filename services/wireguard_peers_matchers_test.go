@@ -3,6 +3,7 @@ package services_test
 import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"golang.org/x/crypto/curve25519"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"net"
 	"reflect"
@@ -187,6 +188,41 @@ func NewPeerCreationTimeMatcherFromModel(model *models.WireguardPeerModel) *Peer
 
 func (m *PeerCreationTimeMatcher) Evaluate(model *models.WireguardPeerModel) bool {
 	return m.creationTime.Equal(model.CreationTime)
+}
+
+type PkPubKeysMatcher struct {
+	expectedPubKey string
+}
+
+func NewPkPubKeysMatcher() *PkPubKeysMatcher {
+	return &PkPubKeysMatcher{}
+}
+
+func (m *PkPubKeysMatcher) SetPublicKey(pubKey string) {
+	m.expectedPubKey = pubKey
+}
+
+func (m *PkPubKeysMatcher) Evaluate(model *models.WireguardPeerModel) bool {
+	// Value externally set. If nil not ready
+	if m.expectedPubKey == "" || m.expectedPubKey != model.PublicKey {
+		return false
+	}
+
+	privateKey, err := wgtypes.ParseKey(model.PrivateKey)
+	if err != nil {
+		return false
+	}
+	publicKey, err := wgtypes.ParseKey(model.PublicKey)
+	if err != nil {
+		return false
+	}
+	privateBytes := [32]byte(privateKey)
+	publicBytes := [32]byte(publicKey)
+	// Verify that the public key comes from the pk
+	if _, err := curve25519.X25519(privateBytes[:], publicBytes[:]); err == nil {
+		return true
+	}
+	return false
 }
 
 type ListPeerMatcher struct {

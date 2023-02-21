@@ -163,9 +163,10 @@ func TestWireguardPeersServiceImplCreatePeer(t *testing.T) {
 	updatePeerResponseProvisionedSave := updatePeerResponseIpSave
 	updatePeerResponseProvisionedSave.State = models.ProvisionStateProvisioned
 
-	entities.wireguardPeersRepositoryMock.EXPECT().
-		UpdatePeer(NewIgnoreKeysPeerMatcher(t, &updatePeerResponseProvisionedSave).Add(NewPeerIpMatcher(peerIp))).
-		Return(&updatePeerResponseProvisionedSave, nil)
+	keyMatcher := NewPkPubKeysMatcher()
+	lastUpdateMatcher := NewIgnoreKeysPeerMatcher(t, &updatePeerResponseProvisionedSave).
+		Add(keyMatcher) // Freshly crated keys that need verification
+	entities.wireguardPeersRepositoryMock.EXPECT().UpdatePeer(lastUpdateMatcher).Return(&updatePeerResponseProvisionedSave, nil)
 
 	/* PROVIDER: Prepare for CreatePeer call to provider */
 	providerPeer := &services.WireguardProviderPeer{}
@@ -176,8 +177,10 @@ func TestWireguardPeersServiceImplCreatePeer(t *testing.T) {
 			gomock.Eq(updatePeerResponseProvisioningSave.PreSharedKey),
 			gomock.Eq(&testDummyEntities.tunnelInfo),
 			gomock.Eq(&testDummyEntities.profileInfo),
-			gomock.Eq(peerIp)).Return(providerPeer, nil)
-
+			gomock.Eq(peerIp)).Return(providerPeer, nil).
+		Do(func(publicKey, _, __ string, ___ *models.WireguardTunnelInfo, ____ *models.WireguardTunnelProfileInfo, _____ net.IP) {
+			keyMatcher.SetPublicKey(publicKey)
+		})
 	// Wait till state goes to provisioned
 	entities.wireguardPeersRepositoryMock.SetUpdatePeerExpected(3)
 	entities.wireguardPeersRepositoryMock.SetSavePeerExpected(1)
@@ -685,6 +688,7 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 			}
 
 			peerIp := scenario.initialPeer.Ip
+			keyMatcher := NewPkPubKeysMatcher()
 			if scenario.initialPeer.Ip == nil || scenario.initialPeer.Ip.IsUnspecified() {
 				poolServiceMock.EXPECT().
 					GetNextIp(gomock.Eq(&testDummyEntities.tunnelInfo)).
@@ -711,7 +715,10 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 						gomock.Eq(scenario.initialPeer.PreSharedKey),
 						gomock.Eq(&testDummyEntities.tunnelInfo),
 						gomock.Eq(&testDummyEntities.profileInfo),
-						gomock.Eq(peerIp)).Return(providerPeer, nil)
+						gomock.Eq(peerIp)).Return(providerPeer, nil).
+					Do(func(publicKey, _, __ string, ___ *models.WireguardTunnelInfo, ____ *models.WireguardTunnelProfileInfo, _____ net.IP) {
+						keyMatcher.SetPublicKey(publicKey)
+					})
 			} else {
 				// As a key exists we will check the provider before
 				providerGetPeerCall := wireguardProviderMock.EXPECT().
@@ -740,7 +747,10 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 							gomock.Eq(scenario.initialPeer.PreSharedKey),
 							gomock.Eq(&testDummyEntities.tunnelInfo),
 							gomock.Eq(&testDummyEntities.profileInfo),
-							gomock.Eq(peerIp)).Return(providerPeer, nil)
+							gomock.Eq(peerIp)).Return(providerPeer, nil).
+						Do(func(publicKey, _, __ string, ___ *models.WireguardTunnelInfo, ____ *models.WireguardTunnelProfileInfo, _____ net.IP) {
+							keyMatcher.SetPublicKey(publicKey)
+						})
 				}
 			}
 
@@ -769,11 +779,13 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 			lastPeer.Ip = peerIp
 
 			lastPeerMatcher := NewIgnoreKeysPeerMatcher(t, &lastPeer)
-			if len(scenario.initialPeer.PublicKey) != 0 {
-				lastPeerMatcher.Add(NewPeerPublicKeyMatcher(scenario.initialPeer.PublicKey))
-			}
-			if len(scenario.initialPeer.PrivateKey) != 0 {
-				lastPeerMatcher.Add(NewPeerPrivateKeyMatcher(scenario.initialPeer.PrivateKey))
+			if len(scenario.initialPeer.PublicKey) == 0 && len(scenario.initialPeer.PrivateKey) == 0 {
+				// Freshly crated keys that need verification
+				lastPeerMatcher.Add(keyMatcher)
+			} else {
+				lastPeerMatcher.
+					Add(NewPeerPublicKeyMatcher(scenario.initialPeer.PublicKey)).
+					Add(NewPeerPrivateKeyMatcher(scenario.initialPeer.PrivateKey))
 			}
 
 			wireguardPeersRepositoryMock.EXPECT().UpdatePeer(lastPeerMatcher).Return(&lastPeer, nil)
