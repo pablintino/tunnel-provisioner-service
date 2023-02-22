@@ -1,6 +1,7 @@
 package services_test
 
 import (
+	"errors"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -799,4 +800,89 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 			poolServiceMock.Wait(time.Second * 2)
 		})
 	}
+}
+
+func TestWireguardPeersServiceImplCreationProvisionError(t *testing.T) {
+	logging.Initialize(false)
+	defer logging.Release()
+
+	testDummyEntities := newPeersDummyEntities()
+	entities := newTestServices(t, testDummyEntities)
+
+	entities.tunnelsServiceMock.EXPECT().
+		GetTunnelConfigById(gomock.Eq(testDummyEntities.tunnelInfo.Id), gomock.Eq(testDummyEntities.profileInfo.Id)).
+		Return(testDummyEntities.tunnelInfo, testDummyEntities.profileInfo, nil).
+		AnyTimes()
+
+	mockedSavedPeer := &models.WireguardPeerModel{
+		Id:           primitive.NewObjectID(),
+		Username:     "test-username",
+		Description:  "description",
+		PreSharedKey: "ivknSU8Bf2uWf/4LerTcOfvvntpFgCYhyOfcIp1N988=",
+		State:        models.ProvisionStateCreated,
+		ProfileId:    testDummyEntities.profileInfo.Id,
+		TunnelId:     testDummyEntities.tunnelInfo.Id,
+		Ip:           net.IPv4zero,
+		CreationTime: time.Now(),
+	}
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		SavePeer(NewIgnoreIdAndCreationTimePeerMatcher(t, mockedSavedPeer)).
+		Return(mockedSavedPeer, nil)
+
+	entities.poolServiceMock.EXPECT().GetNextIp(gomock.Eq(&testDummyEntities.tunnelInfo)).Return(testDummyEntities.peerIp, nil)
+
+	/* REPOSITORY: Prepare first update after acquiring an IP */
+	updatePeerResponseIpSave := *mockedSavedPeer
+	updatePeerResponseIpSave.Ip = testDummyEntities.peerIp
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &updatePeerResponseIpSave)).
+		Return(&updatePeerResponseIpSave, nil)
+
+	/* REPOSITORY: Prepare intermediate update as PROVISIONING */
+	updatePeerResponseProvisioningSave := updatePeerResponseIpSave
+	updatePeerResponseProvisioningSave.State = models.ProvisionStateProvisioning
+
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		UpdatePeer(NewAllMatchersPeerMatcher(t, &updatePeerResponseProvisioningSave)).
+		Return(&updatePeerResponseProvisioningSave, nil)
+
+	providerErr := errors.New("Generic provider test error")
+	/* REPOSITORY: Prepare last Update for final save as ERROR */
+	updatePeerResponseProvisionedSave := updatePeerResponseIpSave
+	updatePeerResponseProvisionedSave.State = models.ProvisionStateError
+	updatePeerResponseProvisionedSave.ProvisionStatus = providerErr.Error()
+
+	entities.wireguardPeersRepositoryMock.EXPECT().
+		UpdatePeer(NewIgnoreKeysPeerMatcher(t, &updatePeerResponseProvisionedSave)).
+		Return(&updatePeerResponseProvisionedSave, nil)
+
+	/* PROVIDER: Prepare for CreatePeer call to provider */
+	entities.wireguardProviderMock.EXPECT().
+		CreatePeer(
+			NewAnyWgKeyMatcher(),
+			gomock.Eq(updatePeerResponseProvisioningSave.Description),
+			gomock.Eq(updatePeerResponseProvisioningSave.PreSharedKey),
+			gomock.Eq(&testDummyEntities.tunnelInfo),
+			gomock.Eq(&testDummyEntities.profileInfo),
+			gomock.Eq(testDummyEntities.peerIp)).Return(nil, providerErr)
+
+	// Wait till state goes to provisioned
+	entities.wireguardPeersRepositoryMock.SetUpdatePeerExpected(3)
+	entities.wireguardPeersRepositoryMock.SetSavePeerExpected(1)
+	entities.poolServiceMock.SetGetNextIpExpected(1)
+
+	// Call method under test
+	result, err := entities.peersService.CreatePeer(
+		mockedSavedPeer.Username,
+		testDummyEntities.tunnelInfo.Id,
+		testDummyEntities.profileInfo.Id,
+		mockedSavedPeer.Description,
+		mockedSavedPeer.PreSharedKey,
+	)
+
+	assert.NotNil(t, result)
+	assert.Nil(t, err)
+
+	// Wait till las update is done
+	entities.wireguardPeersRepositoryMock.Wait(time.Second * 2)
 }
