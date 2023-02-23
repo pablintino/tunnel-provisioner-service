@@ -23,6 +23,8 @@ type LDAPConfiguration struct {
 	UserClass      string  `koanf:"userClass"`
 	UserAttribute  string  `koanf:"userAttribute"`
 	EmailAttribute string  `koanf:"emailAttribute"`
+	SkipVerify     bool    `koanf:"skipVerify"`
+	StartTLS       bool    `koanf:"startTLS"`
 }
 
 type WireguardTunnelProfileConfiguration struct {
@@ -53,10 +55,15 @@ type MongoDBConfiguration struct {
 	Database string `koanf:"database"`
 }
 
+type TLSConfiguration struct {
+	CustomCAsPath string `koanf:"customCaCerts"`
+}
+
 type ServiceConfig struct {
 	LDAPConfiguration    LDAPConfiguration    `koanf:"ldap"`
 	MongoDBConfiguration MongoDBConfiguration `koanf:"mongodb"`
 	Providers            ProvidersConfig      `koanf:"providers"`
+	TLS                  TLSConfiguration     `koanf:"tls"`
 	ServicePort          uint16               `koanf:"port"`
 	DebugMode            bool                 `koanf:"debug"`
 	SyncPeriod           uint64               `koanf:"sync-period-secs"`

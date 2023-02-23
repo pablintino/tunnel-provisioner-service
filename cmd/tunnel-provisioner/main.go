@@ -10,6 +10,7 @@ import (
 	"tunnel-provisioner-service/handlers"
 	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/repositories"
+	"tunnel-provisioner-service/security"
 	"tunnel-provisioner-service/services"
 )
 
@@ -31,6 +32,12 @@ func run() error {
 		return err
 	}
 
+	tlsPools, err := security.NewTlsCertificatePool(serviceConfig.TLS)
+	if err != nil {
+		logging.Logger.Errorw("Error reading/loading TLS certificates", "error", err)
+		return err
+	}
+
 	mongoClient, err := repositories.BuildClient(serviceConfig.MongoDBConfiguration)
 	if err != nil {
 		return err
@@ -39,7 +46,7 @@ func run() error {
 
 	db := mongoClient.Database(serviceConfig.MongoDBConfiguration.Database)
 
-	usersRepository := repositories.NewLDAPUsersRepository(serviceConfig.LDAPConfiguration)
+	usersRepository := repositories.NewLDAPUsersRepository(serviceConfig.LDAPConfiguration, tlsPools)
 	peersRepository := repositories.NewPeersRepository(db)
 	ipPoolRepository := repositories.NewIpPoolRepository(db)
 	wireguardInterfacesRepository := repositories.NewWireguardInterfacesRepository(db)

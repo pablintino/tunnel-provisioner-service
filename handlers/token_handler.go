@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"github.com/golang-jwt/jwt"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"net/http"
-	"time"
+	"tunnel-provisioner-service/security"
 	"tunnel-provisioner-service/services"
 )
 
@@ -30,23 +29,13 @@ func (h *tokenHandler) tokenHandler(c echo.Context) error {
 
 	user := c.Get(userProp).(string)
 
-	// Set custom claims
-	claims := &jwt.StandardClaims{
-		ExpiresAt: time.Now().Add(time.Hour * 72).Unix(),
-		Subject:   user,
-	}
-
-	// Create token with claims
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	// Generate encoded token and send it as response.
-	t, err := token.SignedString([]byte("secret"))
+	userToken, err := security.BuildUserToken(user)
 	if err != nil {
 		return err
 	}
 
 	return c.JSON(http.StatusOK, echo.Map{
-		"token": t,
+		"token": userToken,
 	})
 }
 

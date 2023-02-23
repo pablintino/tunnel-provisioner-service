@@ -1,10 +1,15 @@
 package repositories
 
 import (
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"github.com/go-ldap/ldap"
+	"net"
+	"net/url"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/models"
+	"tunnel-provisioner-service/security"
 )
 
 const (
@@ -17,17 +22,17 @@ type UsersRepository interface {
 }
 
 type LDAPUsersRepository struct {
-	config config.LDAPConfiguration
+	config   config.LDAPConfiguration
+	tlsPools *security.TLSCertificatePool
 }
 
-func NewLDAPUsersRepository(ldapConfiguration config.LDAPConfiguration) *LDAPUsersRepository {
-	ldapProviderImpl := &LDAPUsersRepository{config: ldapConfiguration}
-	return ldapProviderImpl
+func NewLDAPUsersRepository(ldapConfiguration config.LDAPConfiguration, tlsPools *security.TLSCertificatePool) *LDAPUsersRepository {
+	return &LDAPUsersRepository{config: ldapConfiguration, tlsPools: tlsPools}
 }
 
 func (l *LDAPUsersRepository) GetUsers() (map[string]models.User, error) {
 
-	connection, err := ldap.DialURL(l.config.LdapURL)
+	connection, err := l.connect()
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +49,7 @@ func (l *LDAPUsersRepository) GetUsers() (map[string]models.User, error) {
 
 func (l *LDAPUsersRepository) Authenticate(username, password string) error {
 
-	connection, err := ldap.DialURL(l.config.LdapURL)
+	connection, err := l.connect()
 	if err != nil {
 		return err
 	}
@@ -151,4 +156,49 @@ func (l *LDAPUsersRepository) buildUserSearchFilter(username string) string {
 	}
 
 	return fmt.Sprintf("(&%s%s%s)", classCondition, userCondition, userFilter)
+}
+
+func (l *LDAPUsersRepository) connect() (*ldap.Conn, error) {
+
+	lurl, err := url.Parse(l.config.LdapURL)
+	if err != nil {
+		return nil, err
+	}
+
+	host, port, err := net.SplitHostPort(lurl.Host)
+	if err != nil {
+		// we asume that error is due to missing port
+		host = lurl.Host
+		port = ""
+	}
+	switch lurl.Scheme {
+	case "ldap":
+		if port == "" {
+			port = ldap.DefaultLdapPort
+		}
+		conn, err := ldap.Dial("tcp", net.JoinHostPort(host, port))
+		if err != nil {
+			return nil, err
+		}
+		if l.config.StartTLS {
+			if err := conn.StartTLS(l.buildTLSConfig(host)); err != nil {
+				return nil, err
+			}
+		}
+		return conn, nil
+	case "ldaps":
+		if port == "" {
+			port = ldap.DefaultLdapsPort
+		}
+		return ldap.DialTLS("tcp", net.JoinHostPort(host, port), l.buildTLSConfig(host))
+	}
+
+	return nil, errors.New("LDAP schema not supported")
+}
+
+func (l *LDAPUsersRepository) buildTLSConfig(host string) *tls.Config {
+	return &tls.Config{
+		ServerName: host,
+		RootCAs:    l.tlsPools.RootCAs,
+	}
 }
