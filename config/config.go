@@ -155,7 +155,7 @@ func NewServiceConfig(path string) (*ServiceConfig, error) {
 func loadConfig(path string, config *ServiceConfig) (*ServiceConfig, error) {
 	koanfInstance := koanf.New(".")
 	err := koanfInstance.Load(confmap.Provider(map[string]interface{}{
-		"port":             8888,
+		"port":             8080,
 		"sync-period-secs": 900,
 	}, "."), nil)
 	if err != nil {
