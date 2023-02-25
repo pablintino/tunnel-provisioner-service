@@ -14,14 +14,27 @@ import (
 	"tunnel-provisioner-service/services"
 )
 
-func run() error {
-	echoInstance := echo.New()
+func printBanner() {
+	logging.Logger.Infof(
+		"### Tunnel Provisioner Service (%s) #%s, %d Pablintino",
+		config.Version,
+		config.SourceVersion,
+		config.Year)
+	logging.Logger.Infof("Service is starting...")
+}
 
-	logging.Initialize(config.GetDebugMode())
+func run() error {
+	opts, err := config.ParseRunningOpts()
+	if err != nil {
+		return err
+	}
+
+	logging.Initialize(opts.Verbose)
 	defer logging.Release()
 
-	var serviceConfig config.ServiceConfig
-	err := config.LoadConfig(&serviceConfig)
+	printBanner()
+
+	serviceConfig, err := config.NewServiceConfig(opts.ConfigPath)
 	if err != nil {
 		logging.Logger.Errorw("Error reading service configuration", "error", err)
 		return err
@@ -53,11 +66,11 @@ func run() error {
 
 	userService := services.NewUserService(usersRepository)
 
-	providers := services.BuilderProvidersMap(&serviceConfig)
+	providers := services.BuilderProvidersMap(serviceConfig)
 
 	tunnelService := services.NewWireguardTunnelService(
 		wireguardInterfacesRepository,
-		&serviceConfig,
+		serviceConfig,
 		providers,
 	)
 
@@ -80,8 +93,13 @@ func run() error {
 		logging.Logger.Errorw("error booting-up wireguard services", "error", err)
 		return err
 	}
+
+	echoInstance := echo.New()
+	echoInstance.HideBanner = true
+	echoInstance.HidePort = true
 	handlers.Register(echoInstance, userService, peersService, tunnelService)
 
+	logging.Logger.Infof("Service started on %d", serviceConfig.ServicePort)
 	if err := echoInstance.Start(fmt.Sprintf(":%d", serviceConfig.ServicePort)); err != http.ErrServerClosed {
 		logging.Logger.Errorw(
 			"echo failed to boot", "error", err.Error())

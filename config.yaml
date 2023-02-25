@@ -1,0 +1,29 @@
+mongodb:
+  uri: mongodb://mongoadmin:secret@localhost:27017/?authSource=admin
+  database: tunnel-provisioner-dev
+ldap:
+  url: ldap://localhost:389
+  baseDn: DC=my-company,DC=com
+  bindUser: cn=admin,dc=my-company,dc=com
+  bindPassword: 12345
+  userFilter: (memberOf=CN=Test Group,OU=groups,DC=my-company,DC=com)
+  userAttribute: uid
+  emailAttribute: mail
+  userClass: inetOrgPerson
+providers:
+  routeros:
+    mk-test:
+      host: routeros-dev1.internal.pablintino.net
+      tunnels-endpoint-interface: ether1
+      port: 8728
+      username: apitest
+      password: test12345
+      wg-tunnels:
+        wg-road-warriors:
+          interface: test-wg
+          profiles:
+            default-all:
+              ranges:
+                - 10.10.120.0/24
+                - 10.10.100.0/23
+                - 10.10.110.0/24

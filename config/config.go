@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"os"
 	"strings"
 
 	"github.com/knadh/koanf"
@@ -149,21 +148,23 @@ func (c *ServiceConfig) Validate() error {
 	return c.validateRouterOSWireguardRanges()
 }
 
-var koanfInstance = koanf.New(".")
-
-func LoadConfig(config *ServiceConfig) error {
-
+func NewServiceConfig(path string) (*ServiceConfig, error) {
+	config := &ServiceConfig{}
+	return loadConfig(path, config)
+}
+func loadConfig(path string, config *ServiceConfig) (*ServiceConfig, error) {
+	koanfInstance := koanf.New(".")
 	err := koanfInstance.Load(confmap.Provider(map[string]interface{}{
 		"port":             8888,
 		"sync-period-secs": 900,
 	}, "."), nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	err = koanfInstance.Load(file.Provider("test/config.yaml"), yaml.Parser())
+	err = koanfInstance.Load(file.Provider(path), yaml.Parser())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	err = koanfInstance.Load(env.Provider("TPS", ".", func(s string) string {
@@ -171,12 +172,12 @@ func LoadConfig(config *ServiceConfig) error {
 			strings.TrimPrefix(s, "TPS_")), "_", ".", -1)
 	}), nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return koanfInstance.Unmarshal("", config)
-}
+	if err := koanfInstance.Unmarshal("", config); err != nil {
+		return nil, err
+	}
 
-func GetDebugMode() bool {
-	return strings.ToLower(os.Getenv("TPS_DEBUG")) == "true"
+	return config, nil
 }
