@@ -1,6 +1,7 @@
 mongodb:
   uri: mongodb://mongoadmin:secret@localhost:27017/?authSource=admin
   database: tunnel-provisioner-dev
+  timeoutMs: 3000
 ldap:
   url: ldap://localhost:389
   baseDn: DC=my-company,DC=com

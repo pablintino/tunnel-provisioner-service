@@ -23,13 +23,13 @@ type WireguardSyncServiceImpl struct {
 func NewWireguardSyncService(
 	peersService WireguardPeersService,
 	tunnelService WireguardTunnelService,
-	syncPeriod uint64,
+	syncPeriodMs uint64,
 ) *WireguardSyncServiceImpl {
 	return &WireguardSyncServiceImpl{
 		peersService:  peersService,
 		tunnelService: tunnelService,
 		closing:       make(chan bool),
-		syncPeriod:    time.Duration(int64(syncPeriod)) * time.Second,
+		syncPeriod:    time.Duration(syncPeriodMs) * time.Millisecond,
 	}
 }
 

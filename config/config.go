@@ -50,8 +50,9 @@ type ProvidersConfig struct {
 }
 
 type MongoDBConfiguration struct {
-	MongoURI string `koanf:"uri"`
-	Database string `koanf:"database"`
+	MongoURI  string `koanf:"uri"`
+	Database  string `koanf:"database"`
+	TimeoutMs uint64 `koanf:"timeoutMs"`
 }
 
 type TLSConfiguration struct {
@@ -65,7 +66,7 @@ type ServiceConfig struct {
 	TLS                  TLSConfiguration     `koanf:"tls"`
 	ServicePort          uint16               `koanf:"port"`
 	DebugMode            bool                 `koanf:"debug"`
-	SyncPeriod           uint64               `koanf:"sync-period-secs"`
+	SyncPeriodMs         uint64               `koanf:"syncPeriodMs"`
 }
 
 func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
@@ -97,6 +98,7 @@ func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
 	}
 	return nil
 }
+
 func (c *ServiceConfig) validateRouterOSProviderEndpoints() error {
 	for providerName, provider := range c.Providers.RouterOS {
 		if len(provider.TunnelEndpoint) != 0 && len(provider.TunnelEndpointInterface) != 0 {
@@ -152,11 +154,13 @@ func NewServiceConfig(path string) (*ServiceConfig, error) {
 	config := &ServiceConfig{}
 	return loadConfig(path, config)
 }
+
 func loadConfig(path string, config *ServiceConfig) (*ServiceConfig, error) {
 	koanfInstance := koanf.New(".")
 	err := koanfInstance.Load(confmap.Provider(map[string]interface{}{
-		"port":             8080,
-		"sync-period-secs": 900,
+		"port":              8080,
+		"syncPeriodMs":      15000,
+		"mongodb.timeoutMs": 3000,
 	}, "."), nil)
 	if err != nil {
 		return nil, err

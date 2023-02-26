@@ -83,7 +83,7 @@ func run() error {
 		userService,
 	)
 
-	syncService := services.NewWireguardSyncService(peersService, tunnelService, serviceConfig.SyncPeriod)
+	syncService := services.NewWireguardSyncService(peersService, tunnelService, serviceConfig.SyncPeriodMs)
 
 	defer peersService.OnClose()
 	defer syncService.OnClose()

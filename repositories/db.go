@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"net"
 	"reflect"
+	"time"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/logging"
 )
@@ -109,7 +110,10 @@ func createCustomRegistry() *bsoncodec.RegistryBuilder {
 
 func BuildClient(mongoConfig config.MongoDBConfiguration) (*mongo.Client, error) {
 	// Connect to MongoDB
-	mongoconn := options.Client().ApplyURI(mongoConfig.MongoURI).SetRegistry(createCustomRegistry().Build())
+	mongoconn := options.Client().
+		ApplyURI(mongoConfig.MongoURI).
+		SetRegistry(createCustomRegistry().Build()).
+		SetTimeout(time.Duration(mongoConfig.TimeoutMs) * time.Millisecond)
 	mongoclient, err := mongo.Connect(context.TODO(), mongoconn)
 	if err != nil {
 		logging.Logger.Errorw("Error configuring/connecting to MongoDB", "error", err)
