@@ -38,6 +38,7 @@ func registerWireguardPeersHandler(
 
 	wgGroup.GET("/peers", peersHandler.getPeersListHandler)
 	wgGroup.GET("/peers/:id", peersHandler.getPeerByIdHandler)
+	wgGroup.GET("/peers/:id/qr", peersHandler.getPeerQrByIdHandler)
 	wgGroup.DELETE("/peers/:id", peersHandler.peersDeleteHandler)
 	wgGroup.PUT("/peers/:id", peersHandler.peersPutHandler)
 }
@@ -93,6 +94,22 @@ func (h *wireguardPeersHandler) postTunnelProfilesPeersHandler(c echo.Context) e
 func (h *wireguardPeersHandler) peersPutHandler(c echo.Context) error {
 	// TODO
 	return nil
+}
+
+func (h *wireguardPeersHandler) getPeerQrByIdHandler(c echo.Context) error {
+	const defaultSize = 256
+	qrBytes, err := h.wireguardService.GetPeerConfigQr(
+		getUsernameFromContext(c),
+		c.Param("id"),
+		utils.Max(defaultSize, tryGetIntQueryParam(c, "size", defaultSize)),
+	)
+	if err != nil {
+		return err
+	}
+	if qrBytes == nil {
+		return c.NoContent(http.StatusNotFound)
+	}
+	return c.Blob(http.StatusOK, "image/png", qrBytes)
 }
 
 func (h *wireguardPeersHandler) getPeerByIdHandler(c echo.Context) error {

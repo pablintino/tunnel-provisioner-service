@@ -78,6 +78,7 @@ func run() error {
 		poolService,
 		tunnelService,
 		userService,
+		services.NewWireguardQrEncoder(),
 	)
 
 	syncService := services.NewWireguardSyncService(peersService, tunnelService, serviceConfig.SyncPeriodMs)

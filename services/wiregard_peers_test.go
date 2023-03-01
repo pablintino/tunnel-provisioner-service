@@ -45,6 +45,7 @@ type testServices struct {
 	tunnelsServiceMock           *MockWireguardTunnelService
 	wireguardProviderMock        *MockWireguardTunnelProvider
 	poolServiceMock              *WaitingMockPoolService
+	peerQrEncoder                *MockWireguardQrEncoder
 	peersService                 *services.WireguardPeersServiceImpl
 }
 
@@ -56,6 +57,7 @@ func newTestServices(t *testing.T, testDummyEntities *dummyEntities) *testServic
 	testServicesInst.tunnelsServiceMock = NewMockWireguardTunnelService(ctrl)
 	testServicesInst.wireguardProviderMock = NewMockWireguardTunnelProvider(ctrl)
 	testServicesInst.poolServiceMock = NewWaitingMockPoolService(ctrl, t)
+	testServicesInst.peerQrEncoder = NewMockWireguardQrEncoder(ctrl)
 
 	providerMap := map[string]services.WireguardTunnelProvider{
 		testDummyEntities.tunnelInfo.Provider: testServicesInst.wireguardProviderMock,
@@ -66,6 +68,7 @@ func newTestServices(t *testing.T, testDummyEntities *dummyEntities) *testServic
 		testServicesInst.poolServiceMock,
 		testServicesInst.tunnelsServiceMock,
 		testServicesInst.usersServiceMock,
+		testServicesInst.peerQrEncoder,
 	)
 	return testServicesInst
 }
@@ -647,35 +650,21 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 		},
 	} {
 		t.Run(scenario.description, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			wireguardPeersRepositoryMock := NewWaitingMockWireguardPeersRepository(ctrl, t)
-			usersServiceMock := NewMockUsersService(ctrl)
-			tunnelsServiceMock := NewMockWireguardTunnelService(ctrl)
-			wireguardProviderMock := NewMockWireguardTunnelProvider(ctrl)
-			poolServiceMock := NewWaitingMockPoolService(ctrl, t)
 
-			peersService := services.NewWireguardPeersService(
-				wireguardPeersRepositoryMock,
-				map[string]services.WireguardTunnelProvider{
-					testDummyEntities.tunnelInfo.Provider: wireguardProviderMock,
-				},
-				poolServiceMock,
-				tunnelsServiceMock,
-				usersServiceMock,
-			)
+			testServicesInst := newTestServices(t, testDummyEntities)
 
 			// All syncs should retrieve users, peers and active tunnels and their interfaces to check if UP or removal
-			usersServiceMock.EXPECT().GetUsers().Return(testDummyEntities.userMap, nil)
-			wireguardPeersRepositoryMock.EXPECT().
+			testServicesInst.usersServiceMock.EXPECT().GetUsers().Return(testDummyEntities.userMap, nil)
+			testServicesInst.wireguardPeersRepositoryMock.EXPECT().
 				GetAll().
 				Return([]*models.WireguardPeerModel{scenario.initialPeer}, nil)
-			wireguardPeersRepositoryMock.IncGetAllExpected()
+			testServicesInst.wireguardPeersRepositoryMock.IncGetAllExpected()
 
-			tunnelsServiceMock.EXPECT().
+			testServicesInst.tunnelsServiceMock.EXPECT().
 				GetTunnels().
 				Return(map[string]models.WireguardTunnelInfo{testDummyEntities.tunnelInfo.Id: testDummyEntities.tunnelInfo})
 
-			tunnelsServiceMock.EXPECT().
+			testServicesInst.tunnelsServiceMock.EXPECT().
 				GetTunnelConfigById(gomock.Eq(testDummyEntities.tunnelInfo.Id), gomock.Eq(testDummyEntities.profileInfo.Id)).
 				Return(testDummyEntities.tunnelInfo, testDummyEntities.profileInfo, nil).
 				AnyTimes()
@@ -691,25 +680,25 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 			peerIp := scenario.initialPeer.Ip
 			keyMatcher := NewPkPubKeysMatcher()
 			if scenario.initialPeer.Ip == nil || scenario.initialPeer.Ip.IsUnspecified() {
-				poolServiceMock.EXPECT().
+				testServicesInst.poolServiceMock.EXPECT().
 					GetNextIp(gomock.Eq(&testDummyEntities.tunnelInfo)).
 					Return(testDummyEntities.peerIp, nil)
-				poolServiceMock.SetGetNextIpExpected(1)
+				testServicesInst.poolServiceMock.SetGetNextIpExpected(1)
 				peerIp = testDummyEntities.peerIp
 
 				// Intermediate save after acquiring an IP
 				ipSavePeer := *scenario.initialPeer
 				ipSavePeer.Ip = peerIp
 
-				wireguardPeersRepositoryMock.EXPECT().
+				testServicesInst.wireguardPeersRepositoryMock.EXPECT().
 					UpdatePeer(NewAllMatchersPeerMatcher(t, &ipSavePeer)).
 					Return(&ipSavePeer, nil)
-				wireguardPeersRepositoryMock.IncUpdatePeerExpected()
+				testServicesInst.wireguardPeersRepositoryMock.IncUpdatePeerExpected()
 			}
 
 			if len(scenario.initialPeer.PublicKey) == 0 {
 				// Expect build from scratch
-				wireguardProviderMock.EXPECT().
+				testServicesInst.wireguardProviderMock.EXPECT().
 					CreatePeer(
 						NewAnyWgKeyMatcher(),
 						gomock.Eq(scenario.initialPeer.Description),
@@ -722,12 +711,12 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 					})
 			} else {
 				// As a key exists we will check the provider before
-				providerGetPeerCall := wireguardProviderMock.EXPECT().
+				providerGetPeerCall := testServicesInst.wireguardProviderMock.EXPECT().
 					GetPeerByPublicKey(gomock.Eq(providerPeer.PublicKey), gomock.Eq(&testDummyEntities.tunnelInfo))
 				if scenario.peerExistsInRemote {
 					providerGetPeerCall.Return(providerPeer, nil)
 
-					wireguardProviderMock.EXPECT().
+					testServicesInst.wireguardProviderMock.EXPECT().
 						UpdatePeer(
 							gomock.Eq(providerPeer.Id),
 							gomock.Eq(scenario.initialPeer.PublicKey),
@@ -741,7 +730,7 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 				} else {
 					providerGetPeerCall.Return(nil, services.ErrProviderPeerNotFound)
 					// Public key exists in peer, but it's not present at the provider
-					wireguardProviderMock.EXPECT().
+					testServicesInst.wireguardProviderMock.EXPECT().
 						CreatePeer(
 							gomock.Eq(scenario.initialPeer.PublicKey),
 							gomock.Eq(scenario.initialPeer.Description),
@@ -770,8 +759,8 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 					intermediatePeerMatcher.Add(NewPeerPrivateKeyMatcher(scenario.initialPeer.PrivateKey))
 				}
 
-				wireguardPeersRepositoryMock.EXPECT().UpdatePeer(intermediatePeerMatcher).Return(&intermediatePeer, nil)
-				wireguardPeersRepositoryMock.IncUpdatePeerExpected()
+				testServicesInst.wireguardPeersRepositoryMock.EXPECT().UpdatePeer(intermediatePeerMatcher).Return(&intermediatePeer, nil)
+				testServicesInst.wireguardPeersRepositoryMock.IncUpdatePeerExpected()
 			}
 
 			// Last update from PROVISIONING to PROVISIONED
@@ -789,15 +778,15 @@ func TestWireguardPeersServiceImplToProvisionSync(t *testing.T) {
 					Add(NewPeerPrivateKeyMatcher(scenario.initialPeer.PrivateKey))
 			}
 
-			wireguardPeersRepositoryMock.EXPECT().UpdatePeer(lastPeerMatcher).Return(&lastPeer, nil)
-			wireguardPeersRepositoryMock.IncUpdatePeerExpected()
+			testServicesInst.wireguardPeersRepositoryMock.EXPECT().UpdatePeer(lastPeerMatcher).Return(&lastPeer, nil)
+			testServicesInst.wireguardPeersRepositoryMock.IncUpdatePeerExpected()
 
 			// Call the function under test
-			peersService.SyncPeers()
+			testServicesInst.peersService.SyncPeers()
 
 			// Wait till last update is done
-			wireguardPeersRepositoryMock.Wait(time.Second * 2)
-			poolServiceMock.Wait(time.Second * 2)
+			testServicesInst.wireguardPeersRepositoryMock.Wait(time.Second * 2)
+			testServicesInst.poolServiceMock.Wait(time.Second * 2)
 		})
 	}
 }

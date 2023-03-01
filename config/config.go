@@ -104,7 +104,7 @@ func (c *ServiceConfig) validateRouterOSWireguardTunnelNameServers() error {
 	for _, provider := range c.Providers.RouterOS {
 		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
 			for _, dnsIpStr := range tunnelConfig.DNSs {
-				if _, _, err := net.ParseCIDR(dnsIpStr); err != nil {
+				if ip := net.ParseIP(dnsIpStr); ip == nil || ip.IsUnspecified() {
 					return fmt.Errorf("tunnel %s DNS nameserver %s is invalid", tunnelName, dnsIpStr)
 				}
 			}

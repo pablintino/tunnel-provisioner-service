@@ -29,6 +29,7 @@ type WireguardPeersService interface {
 	GetPeers() ([]*models.WireguardPeerModel, error)
 	CreatePeer(username, tunnelId, profileId, description, psk string) (*models.WireGuardAggregatedPeerModel, error)
 	DeletePeer(username, id string) error
+	GetPeerConfigQr(username, id string, size int) ([]byte, error)
 	SyncPeers()
 }
 
@@ -39,6 +40,7 @@ type WireguardPeersServiceImpl struct {
 	usersService             UsersService
 	taskChannel              chan interface{}
 	providers                map[string]WireguardTunnelProvider
+	qrEncoder                WireguardQrEncoder
 }
 
 type wireguardCreationTask struct {
@@ -58,6 +60,7 @@ func NewWireguardPeersService(
 	poolService PoolService,
 	tunnelService WireguardTunnelService,
 	userService UsersService,
+	qrEncoder WireguardQrEncoder,
 ) *WireguardPeersServiceImpl {
 
 	service := &WireguardPeersServiceImpl{
@@ -67,6 +70,7 @@ func NewWireguardPeersService(
 		providers:                providers,
 		tunnelService:            tunnelService,
 		usersService:             userService,
+		qrEncoder:                qrEncoder,
 	}
 	go service.wireguardAsyncRoutine()
 
@@ -95,6 +99,20 @@ func (u *WireguardPeersServiceImpl) GetAggregatedPeersByUsername(username string
 	return peers, nil
 }
 
+func (u *WireguardPeersServiceImpl) GetPeerConfigQr(username, id string, size int) ([]byte, error) {
+	peer, err := u.wireguardPeersRepository.GetPeerById(username, id)
+	if err != nil || peer == nil {
+		return nil, err
+	}
+
+	tunnelInfo, profileInfo, err := u.tunnelService.GetTunnelConfigById(peer.TunnelId, peer.ProfileId)
+	if err != nil && errors.Is(err, ErrServiceNotFoundEntity) {
+		return nil, fmt.Errorf("profile %s not for tunnel %s found", peer.ProfileId, peer.TunnelId)
+	}
+
+	return u.qrEncoder.Encode(peer, &tunnelInfo, &profileInfo, size)
+
+}
 func (u *WireguardPeersServiceImpl) GetPeers() ([]*models.WireguardPeerModel, error) {
 	return u.wireguardPeersRepository.GetAll()
 }

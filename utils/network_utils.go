@@ -114,12 +114,9 @@ func (i IPnMask) String() string {
 func TryParseIPSlice(ips []string) []net.IP {
 	parsedIPs := make([]net.IP, 0)
 	for _, ipStr := range ips {
-		ip, _, err := net.ParseCIDR(ipStr)
-		if err != nil {
-			continue
+		if ip := net.ParseIP(ipStr); ip != nil && !ip.IsUnspecified() {
+			parsedIPs = append(parsedIPs, ip)
 		}
-
-		return append(parsedIPs, ip)
 	}
 	return parsedIPs
 }
