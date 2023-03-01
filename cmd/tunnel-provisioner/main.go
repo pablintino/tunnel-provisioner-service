@@ -16,10 +16,7 @@ import (
 
 func printBanner() {
 	logging.Logger.Infof(
-		"### Tunnel Provisioner Service (%s) #%s, %d Pablintino",
-		config.Version,
-		config.SourceVersion,
-		config.Year)
+		"### Tunnel Provisioner Service (%s) #%s, Pablintino", config.Version, config.SourceVersion)
 	logging.Logger.Infof("Service is starting...")
 }
 

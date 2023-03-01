@@ -13,7 +13,7 @@ test:
 compile:
   stage: build
   script:
-    - go build -o . ./...
+    - ./automation/build
   artifacts:
     paths:
       - tunnel-provisioner
