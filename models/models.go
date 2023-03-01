@@ -103,11 +103,12 @@ type WireguardTunnelInfo struct {
 	Provider  string
 	Interface WireguardInterfaceModel
 	Profiles  map[string]WireguardTunnelProfileInfo
+	DNSs      []net.IP
 }
 
 func (w WireguardTunnelInfo) String() string {
-	return fmt.Sprintf("WireguardTunnelInfo[Id=%s, Name=%s, Provider=%s, Interface=%v, Profiles=%v]", w.Id,
-		w.Name, w.Provider, w.Interface, w.Profiles)
+	return fmt.Sprintf("WireguardTunnelInfo[Id=%s, Name=%s, Provider=%s, Interface=%v, Profiles=%v, DNSs=%v]",
+		w.Id, w.Name, w.Provider, w.Interface, w.Profiles, w.DNSs)
 }
 
 type User struct {

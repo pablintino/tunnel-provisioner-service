@@ -33,6 +33,7 @@ type WireguardTunnelProfileConfiguration struct {
 type WireguardTunnelConfiguration struct {
 	Profiles  map[string]WireguardTunnelProfileConfiguration `koanf:"profiles"`
 	Interface string                                         `koanf:"interface"`
+	DNSs      []string                                       `koanf:"dns-servers"`
 }
 
 type RouterOSProviderConfig struct {
@@ -99,6 +100,19 @@ func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
 	return nil
 }
 
+func (c *ServiceConfig) validateRouterOSWireguardTunnelNameServers() error {
+	for _, provider := range c.Providers.RouterOS {
+		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
+			for _, dnsIpStr := range tunnelConfig.DNSs {
+				if _, _, err := net.ParseCIDR(dnsIpStr); err != nil {
+					return fmt.Errorf("tunnel %s DNS nameserver %s is invalid", tunnelName, dnsIpStr)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (c *ServiceConfig) validateRouterOSProviderEndpoints() error {
 	for providerName, provider := range c.Providers.RouterOS {
 		if len(provider.TunnelEndpoint) != 0 && len(provider.TunnelEndpointInterface) != 0 {
@@ -144,6 +158,10 @@ func (c *ServiceConfig) Validate() error {
 		return err
 	}
 	err = c.validateRouterOSProviderEndpoints()
+	if err != nil {
+		return err
+	}
+	err = c.validateRouterOSWireguardTunnelNameServers()
 	if err != nil {
 		return err
 	}

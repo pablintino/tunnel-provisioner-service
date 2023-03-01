@@ -110,3 +110,29 @@ func (i IPnMask) String() string {
 
 	return i.IP.String() + "/" + strconv.FormatUint(uint64(maskSize), 10)
 }
+
+func TryParseIPSlice(ips []string) []net.IP {
+	parsedIPs := make([]net.IP, 0)
+	for _, ipStr := range ips {
+		ip, _, err := net.ParseCIDR(ipStr)
+		if err != nil {
+			continue
+		}
+
+		return append(parsedIPs, ip)
+	}
+	return parsedIPs
+}
+
+func TryParseNetSlice(nets []string) []net.IPNet {
+	parsedNets := make([]net.IPNet, 0)
+	for _, netStr := range nets {
+		_, net, err := net.ParseCIDR(netStr)
+		if err != nil || net == nil {
+			continue
+		}
+
+		return append(parsedNets, *net)
+	}
+	return parsedNets
+}

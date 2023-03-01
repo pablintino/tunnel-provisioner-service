@@ -1,10 +1,8 @@
 package services
 
 import (
-	"bytes"
 	"errors"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"net"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/models"
@@ -169,14 +167,10 @@ func (s *WireguardTunnelServiceImpl) buildTunnelInfo(config *config.ServiceConfi
 		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
 			profiles := make(map[string]models.WireguardTunnelProfileInfo, 0)
 			for profName, profile := range tunnelConfig.Profiles {
-				ranges := make([]net.IPNet, 0)
-				for _, ipRange := range profile.Ranges {
-					ranges = appendProfileRange(ipRange, ranges)
-				}
 				profileId := utils.GenerateInternalIdFromString(profName)
 				profiles[profileId] = models.WireguardTunnelProfileInfo{
 					Name:   profName,
-					Ranges: ranges,
+					Ranges: utils.TryParseNetSlice(profile.Ranges), // Safe as validated on boot
 					Id:     profileId,
 				}
 			}
@@ -186,6 +180,7 @@ func (s *WireguardTunnelServiceImpl) buildTunnelInfo(config *config.ServiceConfi
 				Id:        tunnelId,
 				Name:      tunnelName,
 				Provider:  providerName,
+				DNSs:      utils.TryParseIPSlice(tunnelConfig.DNSs), // Safe as validated on boot
 				Interface: models.WireguardInterfaceModel{Name: tunnelConfig.Interface, Provider: providerName},
 				Profiles:  profiles,
 			}
@@ -200,17 +195,4 @@ func (s *WireguardTunnelServiceImpl) getTunnelForInterface(interfaceModel *model
 		}
 	}
 	return nil
-}
-
-func appendProfileRange(networkRange string, ranges []net.IPNet) []net.IPNet {
-	// Ignore error as config was validated before and ranges are parseable at this point
-	_, netRange, _ := net.ParseCIDR(networkRange)
-
-	for _, rangeAt := range ranges {
-		if netRange.IP.Equal(rangeAt.IP) && bytes.Equal((*netRange).Mask, rangeAt.Mask) {
-			return ranges
-		}
-	}
-
-	return append(ranges, *netRange)
 }
