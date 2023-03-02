@@ -205,14 +205,13 @@ func (u *WireguardPeersServiceImpl) wireguardAsyncRoutine() {
 		default:
 			fmt.Printf("Type of p is %T. Value %v", p, p)
 		}
-
 	}
 
-	logging.Logger.Debug("Exiting the wireguardAsyncRoutine")
+	logging.Logger.Debug("Wireguard peers service routine is exiting")
 }
 
 func (u *WireguardPeersServiceImpl) handleWireguardSyncTask() {
-
+	logging.Logger.Debug("Wireguard peers sync task received")
 	users, err := u.usersService.GetUsers()
 	if err != nil {
 		logging.Logger.Errorw(

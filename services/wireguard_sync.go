@@ -50,11 +50,12 @@ func (s *WireguardSyncServiceImpl) OnClose() {
 }
 
 func (s *WireguardSyncServiceImpl) syncTask() {
+loop:
 	for {
 		select {
 		case _, ok := <-s.timer.C:
 			if !ok {
-				return
+				break loop
 			}
 			if err := s.handleWireguardSyncTask(); err != nil {
 				logging.Logger.Errorw(
@@ -63,12 +64,14 @@ func (s *WireguardSyncServiceImpl) syncTask() {
 				)
 			}
 		case <-s.closing:
-			return
+			break loop
 		}
 	}
+	logging.Logger.Debug("Wireguard sync service routine is exiting")
 }
 
 func (s *WireguardSyncServiceImpl) handleWireguardSyncTask() error {
+	logging.Logger.Debug("Wireguard sync started")
 	err := s.tunnelService.RefreshTunnelInterfacesInformation()
 	if err != nil {
 		logging.Logger.Errorw(
