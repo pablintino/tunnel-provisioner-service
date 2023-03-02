@@ -3,11 +3,22 @@ package services
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"github.com/skip2/go-qrcode"
 	"gopkg.in/ini.v1"
-	"strings"
 	"tunnel-provisioner-service/models"
+	"tunnel-provisioner-service/utils"
+)
+
+const (
+	sectionNameInterface         = "Interface"
+	sectionNamePeer              = "Peer"
+	filedNameInterfaceAddress    = "Address"
+	filedNameInterfacePrivateKey = "PrivateKey"
+	filedNameInterfaceDns        = "DNS"
+	filedNamePeerPublicKey       = "PublicKey"
+	filedNamePeerEndpoint        = "Endpoint"
+	filedNamePeerPsk             = "PresharedKey"
+	filedNamePeerAllowedIPs      = "AllowedIPs"
 )
 
 type WireguardQrEncoder interface {
@@ -30,39 +41,35 @@ func (e *WireguardQrEncoderImpl) Encode(
 	profileInfo *models.WireguardTunnelProfileInfo,
 	size int) ([]byte, error) {
 	wgConfig := ini.Empty()
-	interfaceSection, err := wgConfig.NewSection("Interface")
+	interfaceSection, err := wgConfig.NewSection(sectionNameInterface)
 	if err != nil {
 		return nil, err
 	}
 
-	interfaceSection.NewKey("Address", peer.Ip.String())
-	interfaceSection.NewKey("PrivateKey", peer.PrivateKey)
+	interfaceSection.NewKey(filedNameInterfaceAddress, peer.Ip.String())
+	interfaceSection.NewKey(filedNameInterfacePrivateKey, peer.PrivateKey)
 
-	if len(tunnelInfo.DNSs) != 0 {
-		nameServers := ""
-		for _, dns := range tunnelInfo.DNSs {
-			nameServers = nameServers + fmt.Sprintf(",%s", dns.String())
-		}
-		interfaceSection.NewKey("DNS", strings.Trim(nameServers, ","))
+	dnss := utils.IPSliceToCommaSeparatedString(tunnelInfo.DNSs)
+	if len(dnss) != 0 {
+		interfaceSection.NewKey(filedNameInterfaceDns, dnss)
 	}
 
-	peerSection, err := wgConfig.NewSection("Peer")
+	peerSection, err := wgConfig.NewSection(sectionNamePeer)
 	if err != nil {
 		return nil, err
 	}
 
-	networksString := ""
-	for _, network := range profileInfo.Ranges {
-		networksString = networksString + fmt.Sprintf(",%s", network.String())
+	networksString := utils.NetSliceToCommaSeparatedString(profileInfo.Ranges)
+	if len(networksString) != 0 {
+		peerSection.NewKey(filedNamePeerAllowedIPs, networksString)
 	}
-	peerSection.NewKey("AllowedIPs", strings.Trim(networksString, ","))
 
 	if peer.PreSharedKey != "" {
-		peerSection.NewKey("PresharedKey", peer.PreSharedKey)
+		peerSection.NewKey(filedNamePeerPsk, peer.PreSharedKey)
 	}
 
-	peerSection.NewKey("PublicKey", tunnelInfo.Interface.PublicKey)
-	peerSection.NewKey("Endpoint", tunnelInfo.Interface.Endpoint)
+	peerSection.NewKey(filedNamePeerPublicKey, tunnelInfo.Interface.PublicKey)
+	peerSection.NewKey(filedNamePeerEndpoint, tunnelInfo.Interface.Endpoint)
 
 	var bytesBuffer bytes.Buffer
 	foo := bufio.NewWriter(&bytesBuffer)

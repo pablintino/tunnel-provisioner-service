@@ -2,8 +2,10 @@ package utils
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // IPnMask Original IPNet truncates the non-masked side in some operations cause this type is meant to be a network
@@ -132,4 +134,20 @@ func TryParseNetSlice(nets []string) []net.IPNet {
 		return append(parsedNets, *net)
 	}
 	return parsedNets
+}
+
+func NetSliceToCommaSeparatedString(nets []net.IPNet) string {
+	networksString := ""
+	for _, network := range nets {
+		networksString = networksString + fmt.Sprintf(",%s", network.String())
+	}
+	return strings.Trim(networksString, ",")
+}
+
+func IPSliceToCommaSeparatedString(ips []net.IP) string {
+	ipsString := ""
+	for _, ip := range ips {
+		ipsString = ipsString + fmt.Sprintf(",%s", ip.String())
+	}
+	return strings.Trim(ipsString, ",")
 }
