@@ -4,7 +4,7 @@ BUILD_HASH=$(git rev-parse HEAD)
 BUILD_COUNT_FROM_TAG="$(git log --oneline $(git describe --tags --abbrev=0).. | wc -l)"
 BUILD_VERSION="$(git describe --abbrev=0 --tags || echo "v0.0.0")"
 if [[ $BUILD_COUNT_FROM_TAG != 0 ]]; then
-  BUILD_VERSION="$BUILD_LAST_TAG+$BUILD_COUNT_FROM_TAG"
+  BUILD_VERSION="$BUILD_VERSION+$BUILD_COUNT_FROM_TAG"
 fi
 
 COMPILER_FLAGS="-X 'tunnel-provisioner-service/config.Version=$BUILD_VERSION'"
