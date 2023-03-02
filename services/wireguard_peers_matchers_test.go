@@ -1,7 +1,6 @@
 package services_test
 
 import (
-	"fmt"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/crypto/curve25519"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -257,7 +256,7 @@ func (e *ListPeerMatcher) Matches(x interface{}) bool {
 }
 
 func (e *ListPeerMatcher) String() string {
-	return fmt.Sprintf("list peer matcher")
+	return "list peer matcher"
 }
 
 func NewAllMatchersPeerMatcher(t *testing.T, model *models.WireguardPeerModel) *ListPeerMatcher {

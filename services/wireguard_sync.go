@@ -57,7 +57,10 @@ func (s *WireguardSyncServiceImpl) syncTask() {
 				return
 			}
 			if err := s.handleWireguardSyncTask(); err != nil {
-
+				logging.Logger.Errorw(
+					"failed to sync service information",
+					"error", err.Error(),
+				)
 			}
 		case <-s.closing:
 			return

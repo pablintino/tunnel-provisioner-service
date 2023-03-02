@@ -42,23 +42,21 @@ func netIpNetDecodeValue(_ bsoncodec.DecodeContext, vr bsonrw.ValueReader, val r
 	}
 
 	var network *net.IPNet
-	var err error
 	switch vrType := vr.Type(); vrType {
 	case bsontype.String:
 		netStr, err := vr.ReadString()
 		if err != nil {
 			return err
 		}
-		_, network, err = net.ParseCIDR(netStr)
+		if _, network, err = net.ParseCIDR(netStr); err != nil {
+			return err
+		}
 	case bsontype.Null:
 		return vr.ReadNull()
 	case bsontype.Undefined:
 		return vr.ReadUndefined()
 	default:
 		return fmt.Errorf("cannot decode %v into a net.IPNet", vr.Type())
-	}
-	if err != nil {
-		return err
 	}
 
 	val.Set(reflect.ValueOf(*network))

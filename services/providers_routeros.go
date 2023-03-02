@@ -268,10 +268,9 @@ func (p *ROSClientPool) RunOnPoolIgnoreResp(cb func(rawClient RouterOSRawApiClie
 }
 
 type ROSWireguardRouterProvider struct {
-	name                     string
-	config                   *config.RouterOSProviderConfig
-	clientPool               *ROSClientPool
-	interfaceResolutionTimer *time.Ticker
+	name       string
+	config     *config.RouterOSProviderConfig
+	clientPool *ROSClientPool
 }
 
 func NewROSWireguardRouterProvider(

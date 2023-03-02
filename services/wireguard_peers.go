@@ -194,25 +194,18 @@ func (u *WireguardPeersServiceImpl) CreatePeer(username, tunnelId, profileId, de
 }
 
 func (u *WireguardPeersServiceImpl) wireguardAsyncRoutine() {
-loop:
-	for {
-		select {
-		case p, ok := <-u.taskChannel:
-			// Rest/Events side
-			if !ok {
-				break loop
-			}
-			switch p := p.(type) {
-			case wireguardCreationTask:
-				u.handleWireguardCreationTask(p)
-			case wireguardDeletionTask:
-				u.handleWireguardDeletionTask(p)
-			case wireguardSyncTask:
-				u.handleWireguardSyncTask()
-			default:
-				fmt.Printf("Type of p is %T. Value %v", p, p)
-			}
+	for p := range u.taskChannel {
+		switch p := p.(type) {
+		case wireguardCreationTask:
+			u.handleWireguardCreationTask(p)
+		case wireguardDeletionTask:
+			u.handleWireguardDeletionTask(p)
+		case wireguardSyncTask:
+			u.handleWireguardSyncTask()
+		default:
+			fmt.Printf("Type of p is %T. Value %v", p, p)
 		}
+
 	}
 
 	logging.Logger.Debug("Exiting the wireguardAsyncRoutine")

@@ -46,12 +46,18 @@ func (e *WireguardQrEncoderImpl) Encode(
 		return nil, err
 	}
 
-	interfaceSection.NewKey(filedNameInterfaceAddress, peer.Ip.String())
-	interfaceSection.NewKey(filedNameInterfacePrivateKey, peer.PrivateKey)
+	if _, err = interfaceSection.NewKey(filedNameInterfaceAddress, peer.Ip.String()); err != nil {
+		return nil, err
+	}
 
-	dnss := utils.IPSliceToCommaSeparatedString(tunnelInfo.DNSs)
-	if len(dnss) != 0 {
-		interfaceSection.NewKey(filedNameInterfaceDns, dnss)
+	if _, err = interfaceSection.NewKey(filedNameInterfacePrivateKey, peer.PrivateKey); err != nil {
+		return nil, err
+	}
+
+	if len(tunnelInfo.DNSs) != 0 {
+		if _, err = interfaceSection.NewKey(filedNameInterfaceDns, utils.IPSliceToCommaSeparatedString(tunnelInfo.DNSs)); err != nil {
+			return nil, err
+		}
 	}
 
 	peerSection, err := wgConfig.NewSection(sectionNamePeer)
@@ -59,22 +65,31 @@ func (e *WireguardQrEncoderImpl) Encode(
 		return nil, err
 	}
 
-	networksString := utils.NetSliceToCommaSeparatedString(profileInfo.Ranges)
-	if len(networksString) != 0 {
-		peerSection.NewKey(filedNamePeerAllowedIPs, networksString)
+	if len(profileInfo.Ranges) != 0 {
+		if _, err = peerSection.NewKey(filedNamePeerAllowedIPs, utils.NetSliceToCommaSeparatedString(profileInfo.Ranges)); err != nil {
+			return nil, err
+		}
 	}
 
 	if peer.PreSharedKey != "" {
-		peerSection.NewKey(filedNamePeerPsk, peer.PreSharedKey)
+		if _, err = peerSection.NewKey(filedNamePeerPsk, peer.PreSharedKey); err != nil {
+			return nil, err
+		}
 	}
 
-	peerSection.NewKey(filedNamePeerPublicKey, tunnelInfo.Interface.PublicKey)
-	peerSection.NewKey(filedNamePeerEndpoint, tunnelInfo.Interface.Endpoint)
-
+	if _, err := peerSection.NewKey(filedNamePeerPublicKey, tunnelInfo.Interface.PublicKey); err != nil {
+		return nil, err
+	}
+	_, err = peerSection.NewKey(filedNamePeerEndpoint, tunnelInfo.Interface.Endpoint)
+	if err != nil {
+		return nil, err
+	}
 	var bytesBuffer bytes.Buffer
 	foo := bufio.NewWriter(&bytesBuffer)
-	wgConfig.WriteTo(foo)
+	if _, err := wgConfig.WriteTo(foo); err != nil {
+		return nil, err
+	}
 	foo.Flush()
 
-	return qrcode.Encode(string(bytesBuffer.Bytes()), qrcode.Medium, size)
+	return qrcode.Encode(bytesBuffer.String(), qrcode.Medium, size)
 }
