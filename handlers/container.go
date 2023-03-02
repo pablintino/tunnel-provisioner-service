@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"github.com/golang-jwt/jwt"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"os"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/services"
@@ -23,14 +21,8 @@ func NewContainer(servicesContainer *services.Container, configuration *config.C
 
 	group := echoInstance.Group("/api/v1")
 
-	// TODO Remove from here
-	jwtMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
-		SigningKey: []byte("secret"),
-		Claims:     &jwt.StandardClaims{},
-	})
-
-	tokenHandler := NewTokenHandler(group, servicesContainer.UsersService)
-	peersHandler := NewWireguardPeersHandler(group, servicesContainer.PeersService, servicesContainer.TunnelService, jwtMiddleware)
+	tokenHandler := NewTokenHandler(group, servicesContainer.UsersService, &configuration.Security.JWT)
+	peersHandler := NewWireguardPeersHandler(group, servicesContainer.PeersService, servicesContainer.TunnelService, &configuration.Security.JWT)
 	return &Container{
 		echoInstance: echoInstance,
 		tokenHandler: tokenHandler,

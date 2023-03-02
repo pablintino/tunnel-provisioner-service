@@ -2,10 +2,10 @@ package repositories
 
 import (
 	"context"
+	"crypto/x509"
 	"go.mongodb.org/mongo-driver/mongo"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/logging"
-	"tunnel-provisioner-service/security"
 )
 
 type Container struct {
@@ -16,7 +16,7 @@ type Container struct {
 	mongoClient          *mongo.Client
 }
 
-func NewContainer(tlsPools *security.TLSCertificatePool, configuration *config.Config) (*Container, error) {
+func NewContainer(tlsCustomCAs *x509.CertPool, configuration *config.Config) (*Container, error) {
 	mongoClient, err := BuildClient(configuration.MongoDBConfiguration)
 	if err != nil {
 		return nil, err
@@ -25,7 +25,7 @@ func NewContainer(tlsPools *security.TLSCertificatePool, configuration *config.C
 	db := mongoClient.Database(configuration.MongoDBConfiguration.Database)
 	return &Container{
 		IpPoolRepository:     NewIpPoolRepository(db),
-		UsersRepository:      NewLDAPUsersRepository(&configuration.LDAPConfiguration, tlsPools),
+		UsersRepository:      NewLDAPUsersRepository(&configuration.LDAPConfiguration, tlsCustomCAs),
 		InterfacesRepository: NewWireguardInterfacesRepository(db),
 		PeersRepository:      NewPeersRepository(db),
 		mongoClient:          mongoClient,

@@ -4,6 +4,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"net/http"
+	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/security"
 	"tunnel-provisioner-service/services"
 )
@@ -14,11 +15,13 @@ const (
 
 type TokenHandler struct {
 	usersService services.UsersService
+	jwtConfig    *config.JWTConfiguration
 }
 
-func NewTokenHandler(group *echo.Group, usersService services.UsersService) *TokenHandler {
+func NewTokenHandler(group *echo.Group, usersService services.UsersService, jwtConfig *config.JWTConfiguration) *TokenHandler {
 	tokenHandler := &TokenHandler{
 		usersService: usersService,
+		jwtConfig:    jwtConfig,
 	}
 
 	// Register the handler
@@ -31,7 +34,7 @@ func (h *TokenHandler) tokenHandler(c echo.Context) error {
 
 	user := c.Get(userProp).(string)
 
-	userToken, err := security.BuildUserToken(user)
+	userToken, err := security.BuildUserToken(user, h.jwtConfig.Key)
 	if err != nil {
 		return err
 	}

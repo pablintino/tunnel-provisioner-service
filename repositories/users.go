@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"github.com/go-ldap/ldap"
@@ -9,7 +10,6 @@ import (
 	"net/url"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/models"
-	"tunnel-provisioner-service/security"
 )
 
 const (
@@ -22,12 +22,12 @@ type UsersRepository interface {
 }
 
 type LDAPUsersRepository struct {
-	config   *config.LDAPConfiguration
-	tlsPools *security.TLSCertificatePool
+	config       *config.LDAPConfiguration
+	tlsCustomCAs *x509.CertPool
 }
 
-func NewLDAPUsersRepository(ldapConfiguration *config.LDAPConfiguration, tlsPools *security.TLSCertificatePool) *LDAPUsersRepository {
-	return &LDAPUsersRepository{config: ldapConfiguration, tlsPools: tlsPools}
+func NewLDAPUsersRepository(ldapConfiguration *config.LDAPConfiguration, tlsCustomCAs *x509.CertPool) *LDAPUsersRepository {
+	return &LDAPUsersRepository{config: ldapConfiguration, tlsCustomCAs: tlsCustomCAs}
 }
 
 func (l *LDAPUsersRepository) GetUsers() (map[string]models.User, error) {
@@ -199,6 +199,6 @@ func (l *LDAPUsersRepository) connect() (*ldap.Conn, error) {
 func (l *LDAPUsersRepository) buildTLSConfig(host string) *tls.Config {
 	return &tls.Config{
 		ServerName: host,
-		RootCAs:    l.tlsPools.RootCAs,
+		RootCAs:    l.tlsCustomCAs,
 	}
 }

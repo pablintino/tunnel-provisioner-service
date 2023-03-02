@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func BuildUserToken(username string) (string, error) {
+func BuildUserToken(username string, key string) (string, error) {
 	// Set custom claims
 	claims := &jwt.StandardClaims{
 		ExpiresAt: time.Now().Add(time.Hour * 72).Unix(),
@@ -13,7 +13,7 @@ func BuildUserToken(username string) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte("secret"))
+	tokenString, err := token.SignedString([]byte(key))
 	if err != nil {
 		return "", err
 	}

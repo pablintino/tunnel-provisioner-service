@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"tunnel-provisioner-service/utils"
 
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
@@ -56,18 +57,23 @@ type MongoDBConfiguration struct {
 	TimeoutMs uint64 `koanf:"timeoutMs"`
 }
 
-type TLSConfiguration struct {
-	CustomCAsPath string `koanf:"customCaCerts"`
+type JWTConfiguration struct {
+	Key string `koanf:"key"`
+}
+
+type SecurityConfiguration struct {
+	CustomCAsPath string           `koanf:"customCaCerts"`
+	JWT           JWTConfiguration `koanf:"jwt"`
 }
 
 type Config struct {
-	LDAPConfiguration    LDAPConfiguration    `koanf:"ldap"`
-	MongoDBConfiguration MongoDBConfiguration `koanf:"mongodb"`
-	Providers            ProvidersConfig      `koanf:"providers"`
-	TLS                  TLSConfiguration     `koanf:"tls"`
-	ServicePort          uint16               `koanf:"port"`
-	DebugMode            bool                 `koanf:"debug"`
-	SyncPeriodMs         uint64               `koanf:"syncPeriodMs"`
+	LDAPConfiguration    LDAPConfiguration     `koanf:"ldap"`
+	MongoDBConfiguration MongoDBConfiguration  `koanf:"mongodb"`
+	Providers            ProvidersConfig       `koanf:"providers"`
+	Security             SecurityConfiguration `koanf:"security"`
+	ServicePort          uint16                `koanf:"port"`
+	DebugMode            bool                  `koanf:"debug"`
+	SyncPeriodMs         uint64                `koanf:"syncPeriodMs"`
 }
 
 func (c *Config) validateRouterOSWireguardRanges() error {
@@ -183,6 +189,7 @@ func loadConfig(path string, config *Config) (*Config, error) {
 		"port":              8080,
 		"syncPeriodMs":      900000,
 		"mongodb.timeoutMs": 3000,
+		"security.jwt.key":  utils.RandString(128),
 	}, "."), nil)
 	if err != nil {
 		return nil, err

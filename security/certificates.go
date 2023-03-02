@@ -4,7 +4,6 @@ import (
 	"crypto/x509"
 	"os"
 	"path/filepath"
-	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/logging"
 )
 
@@ -12,15 +11,8 @@ type TLSCertificatePool struct {
 	RootCAs *x509.CertPool
 }
 
-func NewTlsCertificatePool(tlsConfig config.TLSConfiguration) (*TLSCertificatePool, error) {
-	tlsCertificatePool := &TLSCertificatePool{}
-	if tlsConfig.CustomCAsPath != "" {
-		var err error
-		if tlsCertificatePool.RootCAs, err = loadCACertPool(tlsConfig.CustomCAsPath); err != nil {
-			return nil, err
-		}
-	}
-	return tlsCertificatePool, nil
+func NewTLSCustomCAs(rootCAsPath string) (*x509.CertPool, error) {
+	return loadCACertPool(rootCAsPath)
 }
 
 func loadCACertPool(path string) (*x509.CertPool, error) {
