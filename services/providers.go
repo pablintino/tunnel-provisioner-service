@@ -72,9 +72,3 @@ func BuilderProvidersMap(config *config.ServiceConfig) map[string]WireguardTunne
 
 	return providersMap
 }
-
-func CloseProviders(providersMap map[string]WireguardTunnelProvider) {
-	for _, provider := range providersMap {
-		provider.OnClose()
-	}
-}

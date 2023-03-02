@@ -177,7 +177,7 @@ func loadConfig(path string, config *ServiceConfig) (*ServiceConfig, error) {
 	koanfInstance := koanf.New(".")
 	err := koanfInstance.Load(confmap.Provider(map[string]interface{}{
 		"port":              8080,
-		"syncPeriodMs":      15000,
+		"syncPeriodMs":      900000,
 		"mongodb.timeoutMs": 3000,
 	}, "."), nil)
 	if err != nil {

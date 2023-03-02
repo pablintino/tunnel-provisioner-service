@@ -12,20 +12,22 @@ const (
 	userProp = "basic-user-prop"
 )
 
-type tokenHandler struct {
+type TokenHandler struct {
 	usersService services.UsersService
 }
 
-func registerTokenHandler(group *echo.Group, usersService services.UsersService) {
-	tokenHandler := &tokenHandler{
+func NewTokenHandler(group *echo.Group, usersService services.UsersService) *TokenHandler {
+	tokenHandler := &TokenHandler{
 		usersService: usersService,
 	}
 
 	// Register the handler
 	group.GET("/token", tokenHandler.tokenHandler, middleware.BasicAuth(tokenHandler.basicAuthValidate))
+	return tokenHandler
+
 }
 
-func (h *tokenHandler) tokenHandler(c echo.Context) error {
+func (h *TokenHandler) tokenHandler(c echo.Context) error {
 
 	user := c.Get(userProp).(string)
 
@@ -39,7 +41,7 @@ func (h *tokenHandler) tokenHandler(c echo.Context) error {
 	})
 }
 
-func (h *tokenHandler) basicAuthValidate(username, password string, c echo.Context) (bool, error) {
+func (h *TokenHandler) basicAuthValidate(username, password string, c echo.Context) (bool, error) {
 	if h.usersService.Login(username, password) == nil {
 		c.Set(userProp, username)
 		return true, nil

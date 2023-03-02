@@ -1,10 +1,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"github.com/labstack/echo/v4"
-	"net/http"
 	"os"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/handlers"
@@ -48,68 +44,24 @@ func run() error {
 		return err
 	}
 
-	mongoClient, err := repositories.BuildClient(serviceConfig.MongoDBConfiguration)
+	// Create containers
+	reposContainer, err := repositories.NewContainer(tlsPools, serviceConfig)
 	if err != nil {
 		return err
 	}
-	defer mongoClient.Disconnect(context.TODO())
+	servicesContainer := services.NewContainer(reposContainer, serviceConfig)
+	handlersContainer := handlers.NewContainer(servicesContainer, serviceConfig)
+	defer reposContainer.Destroy()
+	defer servicesContainer.Destroy()
 
-	db := mongoClient.Database(serviceConfig.MongoDBConfiguration.Database)
-
-	usersRepository := repositories.NewLDAPUsersRepository(serviceConfig.LDAPConfiguration, tlsPools)
-	peersRepository := repositories.NewPeersRepository(db)
-	ipPoolRepository := repositories.NewIpPoolRepository(db)
-	wireguardInterfacesRepository := repositories.NewWireguardInterfacesRepository(db)
-
-	userService := services.NewUserService(usersRepository)
-
-	providers := services.BuilderProvidersMap(serviceConfig)
-
-	tunnelService := services.NewWireguardTunnelService(
-		wireguardInterfacesRepository,
-		serviceConfig,
-		providers,
-	)
-
-	poolService := services.NewPoolService(ipPoolRepository, providers)
-	peersService := services.NewWireguardPeersService(
-		peersRepository,
-		providers,
-		poolService,
-		tunnelService,
-		userService,
-		services.NewWireguardQrEncoder(),
-	)
-
-	syncService := services.NewWireguardSyncService(peersService, tunnelService, serviceConfig.SyncPeriodMs)
-
-	defer peersService.OnClose()
-	defer syncService.OnClose()
-	defer services.CloseProviders(providers)
-
-	if err := onWireguardBoot(tunnelService, syncService); err != nil {
-		logging.Logger.Errorw("error booting-up wireguard services", "error", err)
-		return err
+	// Start boot process
+	if err = servicesContainer.Boot(); err == nil {
+		err = handlersContainer.EchoServer.Run()
 	}
 
-	echoInstance := echo.New()
-	echoInstance.HideBanner = true
-	echoInstance.HidePort = true
-	handlers.Register(echoInstance, userService, peersService, tunnelService)
+	logging.Logger.Sync()
 
-	logging.Logger.Infof("Service started on %d", serviceConfig.ServicePort)
-	if err := echoInstance.Start(fmt.Sprintf(":%d", serviceConfig.ServicePort)); err != http.ErrServerClosed {
-		logging.Logger.Errorw(
-			"echo failed to boot", "error", err.Error())
-	}
-	return nil
-}
-
-func onWireguardBoot(tunnelService services.WireguardTunnelService, syncService services.WireguardSyncService) error {
-	if err := tunnelService.OnBoot(); err != nil {
-		return err
-	}
-	return syncService.OnBoot()
+	return err
 }
 
 func main() {

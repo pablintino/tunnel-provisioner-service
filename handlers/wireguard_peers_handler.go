@@ -10,20 +10,20 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-type wireguardPeersHandler struct {
+type WireguardPeersHandler struct {
 	wireguardService services.WireguardPeersService
 	tunnelService    services.WireguardTunnelService
 }
 
-func registerWireguardPeersHandler(
+func NewWireguardPeersHandler(
 	group *echo.Group,
 	wireguardService services.WireguardPeersService,
 	tunnelService services.WireguardTunnelService,
 	middleware ...echo.MiddlewareFunc,
-) {
+) *WireguardPeersHandler {
 	wgGroup := group.Group("/wireguard", middleware...)
 
-	peersHandler := &wireguardPeersHandler{
+	peersHandler := &WireguardPeersHandler{
 		wireguardService: wireguardService,
 		tunnelService:    tunnelService,
 	}
@@ -41,9 +41,11 @@ func registerWireguardPeersHandler(
 	wgGroup.GET("/peers/:id/qr", peersHandler.getPeerQrByIdHandler)
 	wgGroup.DELETE("/peers/:id", peersHandler.peersDeleteHandler)
 	wgGroup.PUT("/peers/:id", peersHandler.peersPutHandler)
+
+	return peersHandler
 }
 
-func (h *wireguardPeersHandler) getPeersListHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) getPeersListHandler(c echo.Context) error {
 	peers, err := h.wireguardService.GetAggregatedPeersByUsername(getUsernameFromContext(c))
 	if err != nil {
 		return err
@@ -56,7 +58,7 @@ func (h *wireguardPeersHandler) getPeersListHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, results)
 }
 
-func (h *wireguardPeersHandler) getTunnelProfilesListHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) getTunnelProfilesListHandler(c echo.Context) error {
 	tunnelInfo, err := h.tunnelService.GetTunnelInfo(c.Param("id"))
 	if err != nil && errors.Is(err, services.ErrServiceNotFoundEntity) {
 		return c.NoContent(http.StatusNotFound)
@@ -71,7 +73,7 @@ func (h *wireguardPeersHandler) getTunnelProfilesListHandler(c echo.Context) err
 	return c.JSON(http.StatusOK, results)
 }
 
-func (h *wireguardPeersHandler) postTunnelProfilesPeersHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) postTunnelProfilesPeersHandler(c echo.Context) error {
 	var request dtos.WireguardPeerRequestDto
 	if err := c.Bind(&request); err != nil {
 		return err
@@ -91,12 +93,12 @@ func (h *wireguardPeersHandler) postTunnelProfilesPeersHandler(c echo.Context) e
 	return c.JSON(http.StatusOK, dtos.ToWireguardPeerDto(peer))
 }
 
-func (h *wireguardPeersHandler) peersPutHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) peersPutHandler(c echo.Context) error {
 	// TODO
 	return nil
 }
 
-func (h *wireguardPeersHandler) getPeerQrByIdHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) getPeerQrByIdHandler(c echo.Context) error {
 	const defaultSize = 256
 	qrBytes, err := h.wireguardService.GetPeerConfigQr(
 		getUsernameFromContext(c),
@@ -112,7 +114,7 @@ func (h *wireguardPeersHandler) getPeerQrByIdHandler(c echo.Context) error {
 	return c.Blob(http.StatusOK, "image/png", qrBytes)
 }
 
-func (h *wireguardPeersHandler) getPeerByIdHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) getPeerByIdHandler(c echo.Context) error {
 
 	peer, err := h.wireguardService.GetAggregatedPeerByUsernameAndId(getUsernameFromContext(c), c.Param("id"))
 	if err != nil {
@@ -124,7 +126,7 @@ func (h *wireguardPeersHandler) getPeerByIdHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, dtos.ToWireguardPeerDto(peer))
 }
 
-func (h *wireguardPeersHandler) peersDeleteHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) peersDeleteHandler(c echo.Context) error {
 
 	err := h.wireguardService.DeletePeer(getUsernameFromContext(c), c.Param("id"))
 	if err != nil {
@@ -134,7 +136,7 @@ func (h *wireguardPeersHandler) peersDeleteHandler(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-func (h *wireguardPeersHandler) getTunnelProfileByIdHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) getTunnelProfileByIdHandler(c echo.Context) error {
 	profileInfo, err := h.tunnelService.GetProfileInfo(c.Param("tid"), c.Param("pid"))
 	if err != nil && errors.Is(err, services.ErrServiceNotFoundEntity) {
 		return c.NoContent(http.StatusNotFound)
@@ -145,7 +147,7 @@ func (h *wireguardPeersHandler) getTunnelProfileByIdHandler(c echo.Context) erro
 	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelProfileDto(&profileInfo))
 }
 
-func (h *wireguardPeersHandler) getTunnelByIdHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) getTunnelByIdHandler(c echo.Context) error {
 	tunnelInfo, err := h.tunnelService.GetTunnelInfo(c.Param("id"))
 	if err != nil && errors.Is(err, services.ErrServiceNotFoundEntity) {
 		return c.NoContent(http.StatusNotFound)
@@ -155,7 +157,7 @@ func (h *wireguardPeersHandler) getTunnelByIdHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, dtos.ToWireguardTunnelDto(&tunnelInfo))
 }
 
-func (h *wireguardPeersHandler) getTunnelsListHandler(c echo.Context) error {
+func (h *WireguardPeersHandler) getTunnelsListHandler(c echo.Context) error {
 	results := make([]dtos.WireguardTunnelDto, 0)
 	for _, tunnel := range h.tunnelService.GetTunnels() {
 		results = append(results, *dtos.ToWireguardTunnelDto(&tunnel))

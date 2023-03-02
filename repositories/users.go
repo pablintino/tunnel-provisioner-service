@@ -22,11 +22,11 @@ type UsersRepository interface {
 }
 
 type LDAPUsersRepository struct {
-	config   config.LDAPConfiguration
+	config   *config.LDAPConfiguration
 	tlsPools *security.TLSCertificatePool
 }
 
-func NewLDAPUsersRepository(ldapConfiguration config.LDAPConfiguration, tlsPools *security.TLSCertificatePool) *LDAPUsersRepository {
+func NewLDAPUsersRepository(ldapConfiguration *config.LDAPConfiguration, tlsPools *security.TLSCertificatePool) *LDAPUsersRepository {
 	return &LDAPUsersRepository{config: ldapConfiguration, tlsPools: tlsPools}
 }
 
