@@ -4,6 +4,7 @@ import (
 	"context"
 	"go.mongodb.org/mongo-driver/mongo"
 	"tunnel-provisioner-service/config"
+	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/security"
 )
 
@@ -15,16 +16,16 @@ type Container struct {
 	mongoClient          *mongo.Client
 }
 
-func NewContainer(tlsPools *security.TLSCertificatePool, serviceConfig *config.ServiceConfig) (*Container, error) {
-	mongoClient, err := BuildClient(serviceConfig.MongoDBConfiguration)
+func NewContainer(tlsPools *security.TLSCertificatePool, configuration *config.Config) (*Container, error) {
+	mongoClient, err := BuildClient(configuration.MongoDBConfiguration)
 	if err != nil {
 		return nil, err
 	}
 
-	db := mongoClient.Database(serviceConfig.MongoDBConfiguration.Database)
+	db := mongoClient.Database(configuration.MongoDBConfiguration.Database)
 	return &Container{
 		IpPoolRepository:     NewIpPoolRepository(db),
-		UsersRepository:      NewLDAPUsersRepository(&serviceConfig.LDAPConfiguration, tlsPools),
+		UsersRepository:      NewLDAPUsersRepository(&configuration.LDAPConfiguration, tlsPools),
 		InterfacesRepository: NewWireguardInterfacesRepository(db),
 		PeersRepository:      NewPeersRepository(db),
 		mongoClient:          mongoClient,
@@ -32,5 +33,7 @@ func NewContainer(tlsPools *security.TLSCertificatePool, serviceConfig *config.S
 }
 
 func (c *Container) Destroy() {
-	c.mongoClient.Disconnect(context.TODO())
+	if err := c.mongoClient.Disconnect(context.TODO()); err != nil {
+		logging.Logger.Errorw("Mongo Client disconnect failed ", "error", err)
+	}
 }

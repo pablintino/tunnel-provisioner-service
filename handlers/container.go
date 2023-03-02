@@ -4,6 +4,7 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"os"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/services"
 )
@@ -15,7 +16,7 @@ type Container struct {
 	echoInstance *echo.Echo
 }
 
-func NewContainer(servicesContainer *services.Container, serviceConfig *config.ServiceConfig,
+func NewContainer(servicesContainer *services.Container, configuration *config.Config, sigIntChan chan os.Signal,
 ) *Container {
 
 	echoInstance := newEchoInstance()
@@ -34,7 +35,7 @@ func NewContainer(servicesContainer *services.Container, serviceConfig *config.S
 		echoInstance: echoInstance,
 		tokenHandler: tokenHandler,
 		peersHandler: peersHandler,
-		EchoServer:   NewEchoServer(echoInstance, serviceConfig, tokenHandler, peersHandler),
+		EchoServer:   NewEchoServer(echoInstance, configuration, tokenHandler, peersHandler, sigIntChan),
 	}
 }
 

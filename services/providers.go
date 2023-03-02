@@ -64,7 +64,7 @@ type WireguardTunnelProvider interface {
 	GetTunnelInterfaceInfo(interfaceName string) (*WireguardInterfaceInfo, error)
 }
 
-func BuilderProvidersMap(config *config.ServiceConfig) map[string]WireguardTunnelProvider {
+func BuilderProvidersMap(config *config.Config) map[string]WireguardTunnelProvider {
 	providersMap := make(map[string]WireguardTunnelProvider, 0)
 	for name, rosProviderConfig := range config.Providers.RouterOS {
 		providersMap[name] = NewROSWireguardRouterProvider(name, &rosProviderConfig, RouterOsRawApiClientFactory)

@@ -60,7 +60,7 @@ type TLSConfiguration struct {
 	CustomCAsPath string `koanf:"customCaCerts"`
 }
 
-type ServiceConfig struct {
+type Config struct {
 	LDAPConfiguration    LDAPConfiguration    `koanf:"ldap"`
 	MongoDBConfiguration MongoDBConfiguration `koanf:"mongodb"`
 	Providers            ProvidersConfig      `koanf:"providers"`
@@ -70,7 +70,7 @@ type ServiceConfig struct {
 	SyncPeriodMs         uint64               `koanf:"syncPeriodMs"`
 }
 
-func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
+func (c *Config) validateRouterOSWireguardRanges() error {
 	for _, provider := range c.Providers.RouterOS {
 		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
 			profiles := make(map[string]*WireguardTunnelProfileConfiguration, 0)
@@ -100,7 +100,7 @@ func (c *ServiceConfig) validateRouterOSWireguardRanges() error {
 	return nil
 }
 
-func (c *ServiceConfig) validateRouterOSWireguardTunnelNameServers() error {
+func (c *Config) validateRouterOSWireguardTunnelNameServers() error {
 	for _, provider := range c.Providers.RouterOS {
 		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
 			for _, dnsIpStr := range tunnelConfig.DNSs {
@@ -113,7 +113,7 @@ func (c *ServiceConfig) validateRouterOSWireguardTunnelNameServers() error {
 	return nil
 }
 
-func (c *ServiceConfig) validateRouterOSProviderEndpoints() error {
+func (c *Config) validateRouterOSProviderEndpoints() error {
 	for providerName, provider := range c.Providers.RouterOS {
 		if len(provider.TunnelEndpoint) != 0 && len(provider.TunnelEndpointInterface) != 0 {
 			return fmt.Errorf("one of tunnels-endpoint or tunnels-endpoint-interface can be provided in %s provider",
@@ -130,7 +130,7 @@ func (c *ServiceConfig) validateRouterOSProviderEndpoints() error {
 	return nil
 }
 
-func (c *ServiceConfig) validateRouterOSProviderUniquenessConstraints() error {
+func (c *Config) validateRouterOSProviderUniquenessConstraints() error {
 	tunnels := make(map[string]struct{}, 0)
 	for providerName, provider := range c.Providers.RouterOS {
 		tunnelIfaces := make(map[string]struct{}, 0)
@@ -151,7 +151,7 @@ func (c *ServiceConfig) validateRouterOSProviderUniquenessConstraints() error {
 	return nil
 }
 
-func (c *ServiceConfig) Validate() error {
+func (c *Config) validate() error {
 	// Important: If new providers are added ensure tunnel name remains "unique" across all of them
 	err := c.validateRouterOSProviderUniquenessConstraints()
 	if err != nil {
@@ -168,12 +168,16 @@ func (c *ServiceConfig) Validate() error {
 	return c.validateRouterOSWireguardRanges()
 }
 
-func NewServiceConfig(path string) (*ServiceConfig, error) {
-	config := &ServiceConfig{}
-	return loadConfig(path, config)
+func New(path string) (*Config, error) {
+	config := &Config{}
+	conf, err := loadConfig(path, config)
+	if err != nil {
+		return nil, err
+	}
+	return conf, conf.validate()
 }
 
-func loadConfig(path string, config *ServiceConfig) (*ServiceConfig, error) {
+func loadConfig(path string, config *Config) (*Config, error) {
 	koanfInstance := koanf.New(".")
 	err := koanfInstance.Load(confmap.Provider(map[string]interface{}{
 		"port":              8080,

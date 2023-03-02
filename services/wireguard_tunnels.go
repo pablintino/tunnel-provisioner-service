@@ -26,10 +26,10 @@ type WireguardTunnelServiceImpl struct {
 	interfacesRepository repositories.WireguardInterfacesRepository
 	tunnels              map[string]*models.WireguardTunnelInfo
 	providers            map[string]WireguardTunnelProvider
-	config               *config.ServiceConfig
+	config               *config.Config
 }
 
-func NewWireguardTunnelService(interfacesRepository repositories.WireguardInterfacesRepository, config *config.ServiceConfig,
+func NewWireguardTunnelService(interfacesRepository repositories.WireguardInterfacesRepository, config *config.Config,
 	providers map[string]WireguardTunnelProvider) *WireguardTunnelServiceImpl {
 	tunnelService := &WireguardTunnelServiceImpl{
 		interfacesRepository: interfacesRepository,
@@ -162,7 +162,7 @@ func (s *WireguardTunnelServiceImpl) OnBoot() error {
 	return nil
 }
 
-func (s *WireguardTunnelServiceImpl) buildTunnelInfo(config *config.ServiceConfig) {
+func (s *WireguardTunnelServiceImpl) buildTunnelInfo(config *config.Config) {
 	for providerName, provider := range config.Providers.RouterOS {
 		for tunnelName, tunnelConfig := range provider.WireguardTunnels {
 			profiles := make(map[string]models.WireguardTunnelProfileInfo, 0)

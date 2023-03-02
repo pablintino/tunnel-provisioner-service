@@ -15,14 +15,13 @@ type Container struct {
 	syncService   WireguardSyncService
 }
 
-func NewContainer(reposContainer *repositories.Container, serviceConfig *config.ServiceConfig) *Container {
-	providers := BuilderProvidersMap(serviceConfig)
+func NewContainer(reposContainer *repositories.Container, configuration *config.Config) *Container {
+	providers := BuilderProvidersMap(configuration)
 	qrEncoder := NewWireguardQrEncoder()
-	tunnelService := NewWireguardTunnelService(reposContainer.InterfacesRepository, serviceConfig, providers)
+	tunnelService := NewWireguardTunnelService(reposContainer.InterfacesRepository, configuration, providers)
 	poolService := NewPoolService(reposContainer.IpPoolRepository, providers)
 	userService := NewUserService(reposContainer.UsersRepository)
 	peersService := NewWireguardPeersService(reposContainer.PeersRepository, providers, poolService, tunnelService, userService, qrEncoder)
-	syncService := NewWireguardSyncService(peersService, tunnelService, serviceConfig.SyncPeriodMs)
 	return &Container{
 		TunnelService: tunnelService,
 		PoolService:   poolService,
@@ -30,7 +29,7 @@ func NewContainer(reposContainer *repositories.Container, serviceConfig *config.
 		UsersService:  userService,
 		qrEncoder:     qrEncoder,
 		providers:     providers,
-		syncService:   syncService,
+		syncService:   NewWireguardSyncService(peersService, tunnelService, configuration.SyncPeriodMs),
 	}
 }
 

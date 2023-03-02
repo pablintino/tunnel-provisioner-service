@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/signal"
 	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/handlers"
 	"tunnel-provisioner-service/logging"
@@ -27,30 +28,28 @@ func run() error {
 
 	printBanner()
 
-	serviceConfig, err := config.NewServiceConfig(opts.ConfigPath)
+	configuration, err := config.New(opts.ConfigPath)
 	if err != nil {
 		logging.Logger.Errorw("Error reading service configuration", "error", err)
 		return err
 	}
-	err = serviceConfig.Validate()
-	if err != nil {
-		logging.Logger.Errorw("Configuration validation error", "error", err)
-		return err
-	}
 
-	tlsPools, err := security.NewTlsCertificatePool(serviceConfig.TLS)
+	tlsPools, err := security.NewTlsCertificatePool(configuration.TLS)
 	if err != nil {
 		logging.Logger.Errorw("Error reading/loading TLS certificates", "error", err)
 		return err
 	}
 
+	sigIntChan := make(chan os.Signal, 1)
+	signal.Notify(sigIntChan, os.Interrupt)
+
 	// Create containers
-	reposContainer, err := repositories.NewContainer(tlsPools, serviceConfig)
+	reposContainer, err := repositories.NewContainer(tlsPools, configuration)
 	if err != nil {
 		return err
 	}
-	servicesContainer := services.NewContainer(reposContainer, serviceConfig)
-	handlersContainer := handlers.NewContainer(servicesContainer, serviceConfig)
+	servicesContainer := services.NewContainer(reposContainer, configuration)
+	handlersContainer := handlers.NewContainer(servicesContainer, configuration, sigIntChan)
 	defer reposContainer.Destroy()
 	defer servicesContainer.Destroy()
 
@@ -59,7 +58,9 @@ func run() error {
 		err = handlersContainer.EchoServer.Run()
 	}
 
-	logging.Logger.Sync()
+	if err != nil {
+		logging.Logger.Errorw("Error booting/running tunnel service", "error", err)
+	}
 
 	return err
 }
