@@ -137,10 +137,6 @@ func (s *WireguardTunnelServiceImpl) fillInterfaceFromRemote(interfaceResolution
 func (s *WireguardTunnelServiceImpl) OnBoot() error {
 	dbInterfaces, err := s.interfacesRepository.GetAll()
 	if err != nil {
-		logging.Logger.Errorw(
-			"Error cleaning tunnel interfaces",
-			"err", err.Error(),
-		)
 		return err
 	}
 
