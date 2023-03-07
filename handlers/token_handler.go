@@ -14,14 +14,17 @@ const (
 )
 
 type TokenHandler struct {
-	usersService services.UsersService
-	jwtConfig    *config.JWTConfiguration
+	usersService    services.UsersService
+	jwtConfig       *config.JWTConfiguration
+	jwtTokenEncoder security.JwtTokenEncoder
 }
 
-func NewTokenHandler(group *echo.Group, usersService services.UsersService, jwtConfig *config.JWTConfiguration) *TokenHandler {
+func NewTokenHandler(group *echo.Group, usersService services.UsersService,
+	jwtTokenEncoder security.JwtTokenEncoder, jwtConfig *config.JWTConfiguration) *TokenHandler {
 	tokenHandler := &TokenHandler{
-		usersService: usersService,
-		jwtConfig:    jwtConfig,
+		usersService:    usersService,
+		jwtConfig:       jwtConfig,
+		jwtTokenEncoder: jwtTokenEncoder,
 	}
 
 	// Register the handler
@@ -34,7 +37,7 @@ func (h *TokenHandler) tokenHandler(c echo.Context) error {
 
 	user := c.Get(userProp).(string)
 
-	userToken, err := security.BuildUserToken(user, h.jwtConfig.Key)
+	userToken, err := h.jwtTokenEncoder.Encode(user)
 	if err != nil {
 		return err
 	}

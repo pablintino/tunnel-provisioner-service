@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"errors"
-	"github.com/golang-jwt/jwt"
-	"github.com/labstack/echo/v4/middleware"
 	"net/http"
-	"tunnel-provisioner-service/config"
 	"tunnel-provisioner-service/dtos"
+	"tunnel-provisioner-service/security"
 	"tunnel-provisioner-service/services"
 	"tunnel-provisioner-service/utils"
 
@@ -22,14 +20,10 @@ func NewWireguardPeersHandler(
 	group *echo.Group,
 	wireguardService services.WireguardPeersService,
 	tunnelService services.WireguardTunnelService,
-	jwtConfig *config.JWTConfiguration,
+	jwtMiddlewareFactory security.EchoJwtMiddlewareFactory,
 ) *WireguardPeersHandler {
 
-	jwtMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
-		SigningKey: []byte(jwtConfig.Key),
-		Claims:     &jwt.StandardClaims{},
-	})
-	wgGroup := group.Group("/wireguard", jwtMiddleware)
+	wgGroup := group.Group("/wireguard", jwtMiddlewareFactory.BuildMiddleware())
 
 	peersHandler := &WireguardPeersHandler{
 		wireguardService: wireguardService,

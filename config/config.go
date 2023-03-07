@@ -58,7 +58,9 @@ type MongoDBConfiguration struct {
 }
 
 type JWTConfiguration struct {
-	Key string `koanf:"key"`
+	TokenEndpointSignKey string `koanf:"tokenEndpointSignKey"`
+	JWTKey               string `koanf:"key"`
+	JKWUrl               string `koanf:"jwkUrl"`
 }
 
 type SecurityConfiguration struct {

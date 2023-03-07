@@ -47,13 +47,17 @@ func run() error {
 	sigIntChan := make(chan os.Signal, 1)
 	signal.Notify(sigIntChan, os.Interrupt)
 
+	securityContainer, err := security.NewContainer(configuration)
+	if err != nil {
+		return err
+	}
 	// Create containers
 	reposContainer, err := repositories.NewContainer(tlsCustomCAs, configuration)
 	if err != nil {
 		return err
 	}
 	servicesContainer := services.NewContainer(reposContainer, configuration)
-	handlersContainer := handlers.NewContainer(servicesContainer, configuration, sigIntChan)
+	handlersContainer := handlers.NewContainer(servicesContainer, securityContainer, configuration, sigIntChan)
 	defer reposContainer.Destroy()
 	defer servicesContainer.Destroy()
 

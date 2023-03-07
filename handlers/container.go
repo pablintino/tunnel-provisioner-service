@@ -4,6 +4,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"os"
 	"tunnel-provisioner-service/config"
+	"tunnel-provisioner-service/security"
 	"tunnel-provisioner-service/services"
 )
 
@@ -14,15 +15,16 @@ type Container struct {
 	echoInstance *echo.Echo
 }
 
-func NewContainer(servicesContainer *services.Container, configuration *config.Config, sigIntChan chan os.Signal,
+func NewContainer(servicesContainer *services.Container, securityContainer *security.Container, configuration *config.Config, sigIntChan chan os.Signal,
 ) *Container {
 
 	echoInstance := newEchoInstance()
 
 	group := echoInstance.Group("/api/v1")
 
-	tokenHandler := NewTokenHandler(group, servicesContainer.UsersService, &configuration.Security.JWT)
-	peersHandler := NewWireguardPeersHandler(group, servicesContainer.PeersService, servicesContainer.TunnelService, &configuration.Security.JWT)
+	tokenHandler := NewTokenHandler(group, servicesContainer.UsersService, securityContainer.JwtTokenEncoder, &configuration.Security.JWT)
+	peersHandler := NewWireguardPeersHandler(group, servicesContainer.PeersService, servicesContainer.TunnelService,
+		securityContainer.EchoJwtMiddlewareFactory)
 	return &Container{
 		echoInstance: echoInstance,
 		tokenHandler: tokenHandler,
