@@ -5,9 +5,9 @@ import (
 )
 
 type Container struct {
-	JwtSignKeyProvider       JwtSignKeyProvider
-	EchoJwtMiddlewareFactory EchoJwtMiddlewareFactory
-	JwtTokenEncoder          JwtTokenEncoder
+	JwtSignKeyProvider JwtSignKeyProvider
+	JwtTokenEncoder    JwtTokenEncoder
+	JwtTokenDecoder    JwtTokenDecoder
 }
 
 func NewContainer(configuration *config.Config) (*Container, error) {
@@ -16,13 +16,13 @@ func NewContainer(configuration *config.Config) (*Container, error) {
 		return nil, err
 	}
 
-	jwtTokenEncoder, err := NewJwtTokenEncoder(jwtSignKeyProvider)
+	jwtTokenEncoder, err := NewJwtTokenEncoder(jwtSignKeyProvider, &configuration.Security.JWT)
 	if err != nil {
 		return nil, err
 	}
 	return &Container{
-		JwtSignKeyProvider:       jwtSignKeyProvider,
-		EchoJwtMiddlewareFactory: NewEchoJwtMiddlewareFactory(jwtSignKeyProvider),
-		JwtTokenEncoder:          jwtTokenEncoder,
+		JwtSignKeyProvider: jwtSignKeyProvider,
+		JwtTokenEncoder:    jwtTokenEncoder,
+		JwtTokenDecoder:    NewJwtTokenDecoderImpl(jwtSignKeyProvider, &configuration.Security.JWT),
 	}, nil
 }

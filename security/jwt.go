@@ -8,22 +8,19 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
-	"fmt"
-	"github.com/golang-jwt/jwt"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
-	jwtv2 "github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/lestrrat-go/jwx/v2/jwt"
 	"os"
 	"strings"
 	"time"
 	"tunnel-provisioner-service/config"
+	"tunnel-provisioner-service/models"
 )
 
 type JwtSignKeyProvider interface {
 	GetSignKey() jwk.Key
-	GetPubKey(kid string) jwk.Key
+	GetKeySet() jwk.Set
 }
 
 type JwtSignKeyProviderImpl struct {
@@ -37,16 +34,19 @@ func NewJwtSignKeyProvider(jwtConfig *config.JWTConfiguration) (*JwtSignKeyProvi
 		jwtConfig: jwtConfig,
 	}
 
-	if jwtConfig.JKWUrl != "" {
-		if err := provider.initializeWithRemoteJwk(); err != nil {
-			return nil, err
-		}
-	} else if jwtConfig.JWTKey == "" {
-		provider.initializeWithRandomKey()
+	var err error = nil
+	if jwtConfig.JWKSUrl != "" {
+		err = provider.initializeWithRemoteJwk()
+	} else if jwtConfig.JWTValidationKey != "" {
+		err = provider.initializeWithProvidedSignKey()
+	} else if jwtConfig.JWTSignPrivateKey != "" {
+		err = provider.initializeWithProvidedPrivateKey()
 	} else {
-		if err := provider.initializeWithProvidedKey(); err != nil {
-			return nil, err
-		}
+		provider.initializeWithRandomKey()
+	}
+
+	if err != nil {
+		return nil, err
 	}
 
 	return provider, nil
@@ -54,11 +54,11 @@ func NewJwtSignKeyProvider(jwtConfig *config.JWTConfiguration) (*JwtSignKeyProvi
 
 func (p *JwtSignKeyProviderImpl) initializeWithRemoteJwk() error {
 	cache := jwk.NewCache(context.Background())
-	err := cache.Register(p.jwtConfig.JKWUrl, jwk.WithMinRefreshInterval(15*time.Minute))
+	err := cache.Register(p.jwtConfig.JWKSUrl, jwk.WithMinRefreshInterval(15*time.Minute))
 	if err != nil {
 		return err
 	}
-	p.keySet = jwk.NewCachedSet(cache, p.jwtConfig.JKWUrl)
+	p.keySet = jwk.NewCachedSet(cache, p.jwtConfig.JWKSUrl)
 	return nil
 }
 
@@ -72,7 +72,7 @@ func (p *JwtSignKeyProviderImpl) initializeWithRandomKey() {
 	// Encode private key to PEM to store it in memory
 	privPEM := pem.EncodeToMemory(
 		&pem.Block{
-			Type:  rsaPrivateKeyHeader,
+			Type:  pemBlockTypeRsaPrivateKeyHeader,
 			Bytes: x509.MarshalPKCS1PrivateKey(key),
 		},
 	)
@@ -96,7 +96,7 @@ func (p *JwtSignKeyProviderImpl) initializeWithRandomKey() {
 func (p *JwtSignKeyProviderImpl) initKeySetFromPrivateKey(key *rsa.PrivateKey) error {
 	pubPEM := pem.EncodeToMemory(
 		&pem.Block{
-			Type:  rsaPublicKeyHeader,
+			Type:  pemBlockTypeRsaPublicKeyHeader,
 			Bytes: x509.MarshalPKCS1PublicKey(key.Public().(*rsa.PublicKey)),
 		},
 	)
@@ -116,22 +116,8 @@ func (p *JwtSignKeyProviderImpl) initKeySetFromPrivateKey(key *rsa.PrivateKey) e
 	return nil
 }
 
-func (p *JwtSignKeyProviderImpl) initializeWithProvidedKey() error {
-	// If the data is loaded in configuration wrapped it can contain spaces and line breaks
-	sanitizedBase64String := strings.ReplaceAll(p.jwtConfig.JWTKey, "\n", "")
-	sanitizedBase64String = strings.ReplaceAll(sanitizedBase64String, " ", "")
-
-	decodedPEMData, err := base64.StdEncoding.DecodeString(sanitizedBase64String)
-	if err != nil {
-		return errors.New("JWT sign key in not a valid base64 string")
-	}
-
-	privatePEM := getPublicKeyFromPEM(decodedPEMData)
-	if privatePEM == nil {
-		return errors.New("JWT sign key doesn't contain a proper private RSA key in PEM format")
-	}
-
-	privateKey, err := jwk.ParseKey(pem.EncodeToMemory(privatePEM), jwk.WithPEM(true))
+func (p *JwtSignKeyProviderImpl) initializeWithProvidedPrivateKey() error {
+	privateKey, err := p.getKeyFromEncodedData(p.jwtConfig.JWTSignPrivateKey, pemBlockTypeRsaPrivateKeyHeader)
 	if err != nil {
 		// Should never reach this as key is generated here and not provided from environment
 		return err
@@ -149,58 +135,51 @@ func (p *JwtSignKeyProviderImpl) initializeWithProvidedKey() error {
 	p.keySet = jwk.NewSet()
 	p.signKey = privateKey
 	return p.initKeySetFromPrivateKey(&privateRSAKey)
-
 }
 
-func (p *JwtSignKeyProviderImpl) GetPubKey(kid string) jwk.Key {
-	if key, found := p.keySet.LookupKeyID(kid); found {
-		return key
+func (p *JwtSignKeyProviderImpl) initializeWithProvidedSignKey() error {
+	publicKey, err := p.getKeyFromEncodedData(p.jwtConfig.JWTValidationKey, pemBlockTypeRsaPublicKeyHeader)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	if err := jwk.AssignKeyID(publicKey); err != nil {
+		return err
+	}
+
+	p.keySet = jwk.NewSet()
+	return p.keySet.AddKey(publicKey)
+}
+
+func (p *JwtSignKeyProviderImpl) getKeyFromEncodedData(encodedKey string, pemType pemBlockType) (jwk.Key, error) {
+	// If the data is loaded in configuration wrapped it can contain spaces and line breaks
+	sanitizedBase64String := strings.ReplaceAll(encodedKey, "\n", "")
+	sanitizedBase64String = strings.ReplaceAll(sanitizedBase64String, " ", "")
+
+	decodedPEMData, err := base64.StdEncoding.DecodeString(sanitizedBase64String)
+	if err != nil {
+		return nil, errors.New("JWT key in not a valid base64 string")
+	}
+
+	pemData := getPemContentBlock(decodedPEMData, pemType)
+	if pemData == nil {
+		return nil, errors.New("JWT key doesn't contain a proper RSA key in PEM format")
+	}
+
+	jwtKey, err := jwk.ParseKey(pem.EncodeToMemory(pemData), jwk.WithPEM(true))
+	if err != nil {
+		return nil, err
+	}
+
+	return jwtKey, err
+}
+
+func (p *JwtSignKeyProviderImpl) GetKeySet() jwk.Set {
+	return p.keySet
 }
 
 func (p *JwtSignKeyProviderImpl) GetSignKey() jwk.Key {
 	return p.signKey
-}
-
-type EchoJwtMiddlewareFactory interface {
-	BuildMiddleware() echo.MiddlewareFunc
-}
-
-type EchoJwtMiddlewareFactoryImpl struct {
-	jwtSignKeyProvider JwtSignKeyProvider
-}
-
-func NewEchoJwtMiddlewareFactory(jwtSignKeyProvider JwtSignKeyProvider) *EchoJwtMiddlewareFactoryImpl {
-	return &EchoJwtMiddlewareFactoryImpl{
-		jwtSignKeyProvider: jwtSignKeyProvider,
-	}
-}
-
-func (f *EchoJwtMiddlewareFactoryImpl) BuildMiddleware() echo.MiddlewareFunc {
-	jwtMiddleware := middleware.JWTWithConfig(middleware.JWTConfig{
-		KeyFunc: func(token *jwt.Token) (interface{}, error) {
-			keyID, ok := token.Header["kid"].(string)
-			if !ok {
-				return nil, errors.New("expecting JWT header to have a key ID in the kid field")
-			}
-
-			key := f.jwtSignKeyProvider.GetPubKey(keyID)
-			if key == nil {
-				return nil, fmt.Errorf("unable to find key %q", keyID)
-			}
-
-			var pubKey interface{}
-			if err := key.Raw(&pubKey); err != nil {
-				return nil, fmt.Errorf("unable to get the public key. Error: %s", err.Error())
-			}
-
-			return pubKey, nil
-		},
-		Claims: &jwt.StandardClaims{},
-	})
-
-	return jwtMiddleware
 }
 
 type JwtTokenEncoder interface {
@@ -209,10 +188,11 @@ type JwtTokenEncoder interface {
 
 type JwtTokenEncoderImpl struct {
 	jwtSignKeyProvider JwtSignKeyProvider
+	jwtConfig          *config.JWTConfiguration
 	issuer             string
 }
 
-func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider) (*JwtTokenEncoderImpl, error) {
+func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config.JWTConfiguration) (*JwtTokenEncoderImpl, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return nil, err
@@ -221,24 +201,110 @@ func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider) (*JwtTokenEncoder
 	return &JwtTokenEncoderImpl{
 		jwtSignKeyProvider: jwtSignKeyProvider,
 		issuer:             hostname,
+		jwtConfig:          jwtConfig,
 	}, nil
 }
 
 func (f *JwtTokenEncoderImpl) Encode(username string) (string, error) {
 	now := time.Now()
-	tok, err := jwtv2.NewBuilder().
+	tokenBuilder := jwt.NewBuilder().
 		Issuer(f.issuer).
 		Expiration(now.Add(time.Hour * 72)).
 		Subject(username).
-		IssuedAt(now).
-		Build()
+		IssuedAt(now)
+
+	if f.jwtConfig.UsernameClaim != "" {
+		tokenBuilder = tokenBuilder.Claim(f.jwtConfig.UsernameClaim, username)
+	}
+
+	// Hardcode audience if specified in configuration
+	if f.jwtConfig.Audience != "" {
+		tokenBuilder = tokenBuilder.Audience([]string{f.jwtConfig.Audience})
+	}
+
+	token, err := tokenBuilder.Build()
 	if err != nil {
 		return "", err
 	}
 
-	signed, err := jwtv2.Sign(tok, jwtv2.WithKey(jwa.RS256, f.jwtSignKeyProvider.GetSignKey()))
+	signed, err := jwt.Sign(token, jwt.WithKey(jwa.RS256, f.jwtSignKeyProvider.GetSignKey()))
 	if err != nil {
 		return "", err
 	}
 	return string(signed), nil
+}
+
+type JwtTokenDecoder interface {
+	Decode(token string) (*models.User, error)
+}
+
+type JwtTokenDecoderImpl struct {
+	jwtSignKeyProvider JwtSignKeyProvider
+	jwtConfig          *config.JWTConfiguration
+}
+
+func NewJwtTokenDecoderImpl(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config.JWTConfiguration) *JwtTokenDecoderImpl {
+	return &JwtTokenDecoderImpl{
+		jwtSignKeyProvider: jwtSignKeyProvider,
+		jwtConfig:          jwtConfig,
+	}
+}
+
+func (d *JwtTokenDecoderImpl) Decode(tokenString string) (*models.User, error) {
+	token, err := d.parseToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+
+	userModel := &models.User{}
+
+	// Parse user, mandatory
+	if d.jwtConfig.UsernameClaim == "" {
+		userModel.Username = token.Subject()
+	} else if username, ok := d.getTokenClaimAsString(token, d.jwtConfig.UsernameClaim); ok {
+		userModel.Username = username
+	}
+
+	if userModel.Username == "" {
+		return nil, errors.New("cannot decode username from JWT string claims")
+	}
+
+	// Parse email, if available
+	usernameClaim := "email"
+	if d.jwtConfig.EmailClaim != "" {
+		usernameClaim = d.jwtConfig.EmailClaim
+	}
+	if email, ok := d.getTokenClaimAsString(token, usernameClaim); ok {
+		userModel.Email = email
+	}
+
+	return userModel, nil
+}
+
+func (d *JwtTokenDecoderImpl) getTokenClaimAsString(token jwt.Token, claim string) (string, bool) {
+	if val, ok := token.PrivateClaims()[claim]; ok {
+		if strVal, typeOk := val.(string); typeOk {
+			return strVal, true
+		}
+	}
+	return "", false
+}
+
+func (d *JwtTokenDecoderImpl) parseToken(tokenString string) (jwt.Token, error) {
+	token := jwt.New()
+
+	options := []jwt.ParseOption{
+		jwt.WithToken(token),
+		jwt.WithKeySet(d.jwtSignKeyProvider.GetKeySet()),
+		jwt.WithValidate(true),
+	}
+
+	if d.jwtConfig.Audience != "" {
+		options = append(options, jwt.WithAudience(d.jwtConfig.Audience))
+	}
+
+	if _, err := jwt.ParseString(tokenString, options...); err != nil {
+		return nil, err
+	}
+	return token, nil
 }

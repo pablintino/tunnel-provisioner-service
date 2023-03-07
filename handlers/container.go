@@ -22,9 +22,13 @@ func NewContainer(servicesContainer *services.Container, securityContainer *secu
 
 	group := echoInstance.Group("/api/v1")
 
-	tokenHandler := NewTokenHandler(group, servicesContainer.UsersService, securityContainer.JwtTokenEncoder, &configuration.Security.JWT)
+	var tokenHandler *TokenHandler = nil
+	if shouldEnableTokenHandler(&configuration.Security.JWT) {
+		tokenHandler = NewTokenHandler(group, servicesContainer.UsersService, securityContainer.JwtTokenEncoder)
+	}
+
 	peersHandler := NewWireguardPeersHandler(group, servicesContainer.PeersService, servicesContainer.TunnelService,
-		securityContainer.EchoJwtMiddlewareFactory)
+		NewEchoJwtMiddlewareFactory(securityContainer.JwtTokenDecoder))
 	return &Container{
 		echoInstance: echoInstance,
 		tokenHandler: tokenHandler,
@@ -38,4 +42,9 @@ func newEchoInstance() *echo.Echo {
 	echoInstance.HideBanner = true
 	echoInstance.HidePort = true
 	return echoInstance
+}
+
+func shouldEnableTokenHandler(jwtConfig *config.JWTConfiguration) bool {
+	// Token handler is only available if no other method of verifying is loaded (random or loaded key will be used)
+	return jwtConfig.JWTValidationKey == "" && jwtConfig.JWKSUrl == ""
 }

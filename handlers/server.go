@@ -12,9 +12,9 @@ import (
 )
 
 type EchoServer struct {
-	Config                *config.Config
-	TokenHandler          *TokenHandler
-	WireguardPeersHandler *WireguardPeersHandler
+	config                *config.Config
+	tokenHandler          *TokenHandler
+	wireguardPeersHandler *WireguardPeersHandler
 	echo                  *echo.Echo
 	serverErrChan         chan error
 	sigIntChan            chan os.Signal
@@ -29,9 +29,9 @@ func NewEchoServer(
 ) *EchoServer {
 	return &EchoServer{
 		echo:                  echo,
-		WireguardPeersHandler: wireguardPeersHandler,
-		TokenHandler:          tokenHandler,
-		Config:                config,
+		wireguardPeersHandler: wireguardPeersHandler,
+		tokenHandler:          tokenHandler,
+		config:                config,
 		serverErrChan:         make(chan error, 1),
 		sigIntChan:            sigIntChan,
 	}
@@ -39,8 +39,8 @@ func NewEchoServer(
 
 func (s *EchoServer) serverRun() {
 	go func() {
-		logging.Logger.Infof("Service started on %d", s.Config.ServicePort)
-		if err := s.echo.Start(fmt.Sprintf(":%d", s.Config.ServicePort)); err != http.ErrServerClosed {
+		logging.Logger.Infof("Service started on %d", s.config.ServicePort)
+		if err := s.echo.Start(fmt.Sprintf(":%d", s.config.ServicePort)); err != http.ErrServerClosed {
 			s.serverErrChan <- err
 		}
 	}()

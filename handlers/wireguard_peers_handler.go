@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"tunnel-provisioner-service/dtos"
-	"tunnel-provisioner-service/security"
 	"tunnel-provisioner-service/services"
 	"tunnel-provisioner-service/utils"
 
@@ -20,7 +19,7 @@ func NewWireguardPeersHandler(
 	group *echo.Group,
 	wireguardService services.WireguardPeersService,
 	tunnelService services.WireguardTunnelService,
-	jwtMiddlewareFactory security.EchoJwtMiddlewareFactory,
+	jwtMiddlewareFactory EchoJwtMiddlewareFactory,
 ) *WireguardPeersHandler {
 
 	wgGroup := group.Group("/wireguard", jwtMiddlewareFactory.BuildMiddleware())

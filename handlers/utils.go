@@ -1,15 +1,14 @@
 package handlers
 
 import (
-	"github.com/golang-jwt/jwt"
 	"github.com/labstack/echo/v4"
 	"strconv"
+	"tunnel-provisioner-service/models"
 )
 
 func getUsernameFromContext(c echo.Context) string {
-	token := c.Get("user").(*jwt.Token)
-	claims := token.Claims.(*jwt.StandardClaims)
-	return claims.Subject
+	contextUser := c.Get(contextUserKey).(*models.User)
+	return contextUser.Username
 }
 
 func tryGetIntQueryParam(c echo.Context, name string, defaultValue int) int {
