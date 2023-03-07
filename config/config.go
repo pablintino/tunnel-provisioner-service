@@ -62,6 +62,7 @@ type JWTConfiguration struct {
 	JWTValidationKey   string `koanf:"validationKey"`
 	JWKSUrl            string `koanf:"jwksUrl"`
 	Audience           string `koanf:"audience"`
+	Issuer             string `koanf:"issuer"`
 	UsernameClaim      string `koanf:"usernameClaim"`
 	EmailClaim         string `koanf:"emailClaim"`
 	SignExpirationTime uint64 `koanf:"signExpirationTimeMs"`

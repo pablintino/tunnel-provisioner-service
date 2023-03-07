@@ -16,13 +16,9 @@ func NewContainer(configuration *config.Config) (*Container, error) {
 		return nil, err
 	}
 
-	jwtTokenEncoder, err := NewJwtTokenEncoder(jwtSignKeyProvider, &configuration.Security.JWT)
-	if err != nil {
-		return nil, err
-	}
 	return &Container{
 		JwtSignKeyProvider: jwtSignKeyProvider,
-		JwtTokenEncoder:    jwtTokenEncoder,
+		JwtTokenEncoder:    NewJwtTokenEncoder(jwtSignKeyProvider, &configuration.Security.JWT),
 		JwtTokenDecoder:    NewJwtTokenDecoderImpl(jwtSignKeyProvider, &configuration.Security.JWT),
 	}, nil
 }

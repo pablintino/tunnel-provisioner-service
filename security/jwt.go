@@ -11,7 +11,6 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
-	"os"
 	"strings"
 	"time"
 	"tunnel-provisioner-service/config"
@@ -189,16 +188,10 @@ type JwtTokenEncoder interface {
 type JwtTokenEncoderImpl struct {
 	jwtSignKeyProvider JwtSignKeyProvider
 	jwtConfig          *config.JWTConfiguration
-	issuer             string
 	expiration         time.Duration
 }
 
-func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config.JWTConfiguration) (*JwtTokenEncoderImpl, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, err
-	}
-
+func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config.JWTConfiguration) *JwtTokenEncoderImpl {
 	expiration := time.Hour * 72
 	if jwtConfig.SignExpirationTime != 0 {
 		expiration = time.Duration(jwtConfig.SignExpirationTime) * time.Millisecond
@@ -206,16 +199,14 @@ func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config
 
 	return &JwtTokenEncoderImpl{
 		jwtSignKeyProvider: jwtSignKeyProvider,
-		issuer:             hostname,
 		jwtConfig:          jwtConfig,
 		expiration:         expiration,
-	}, nil
+	}
 }
 
 func (f *JwtTokenEncoderImpl) Encode(username string) (string, error) {
 	now := time.Now()
 	tokenBuilder := jwt.NewBuilder().
-		Issuer(f.issuer).
 		Expiration(now.Add(f.expiration)).
 		Subject(username).
 		IssuedAt(now)
@@ -227,6 +218,11 @@ func (f *JwtTokenEncoderImpl) Encode(username string) (string, error) {
 	// Hardcode audience if specified in configuration
 	if f.jwtConfig.Audience != "" {
 		tokenBuilder = tokenBuilder.Audience([]string{f.jwtConfig.Audience})
+	}
+
+	// Hardcode issuer if specified in configuration
+	if f.jwtConfig.Issuer != "" {
+		tokenBuilder = tokenBuilder.Issuer(f.jwtConfig.Issuer)
 	}
 
 	token, err := tokenBuilder.Build()
@@ -308,6 +304,10 @@ func (d *JwtTokenDecoderImpl) parseToken(tokenString string) (jwt.Token, error) 
 
 	if d.jwtConfig.Audience != "" {
 		options = append(options, jwt.WithAudience(d.jwtConfig.Audience))
+	}
+
+	if d.jwtConfig.Issuer != "" {
+		options = append(options, jwt.WithIssuer(d.jwtConfig.Issuer))
 	}
 
 	if _, err := jwt.ParseString(tokenString, options...); err != nil {
