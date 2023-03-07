@@ -58,12 +58,13 @@ type MongoDBConfiguration struct {
 }
 
 type JWTConfiguration struct {
-	JWTSignPrivateKey string `koanf:"signPrivateKey"`
-	JWTValidationKey  string `koanf:"validationKey"`
-	JWKSUrl           string `koanf:"jwksUrl"`
-	Audience          string `koanf:"audience"`
-	UsernameClaim     string `koanf:"usernameClaim"`
-	EmailClaim        string `koanf:"emailClaim"`
+	JWTSignPrivateKey  string `koanf:"signPrivateKey"`
+	JWTValidationKey   string `koanf:"validationKey"`
+	JWKSUrl            string `koanf:"jwksUrl"`
+	Audience           string `koanf:"audience"`
+	UsernameClaim      string `koanf:"usernameClaim"`
+	EmailClaim         string `koanf:"emailClaim"`
+	SignExpirationTime uint64 `koanf:"signExpirationTimeMs"`
 }
 
 type SecurityConfiguration struct {

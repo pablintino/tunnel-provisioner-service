@@ -190,6 +190,7 @@ type JwtTokenEncoderImpl struct {
 	jwtSignKeyProvider JwtSignKeyProvider
 	jwtConfig          *config.JWTConfiguration
 	issuer             string
+	expiration         time.Duration
 }
 
 func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config.JWTConfiguration) (*JwtTokenEncoderImpl, error) {
@@ -198,10 +199,16 @@ func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config
 		return nil, err
 	}
 
+	expiration := time.Hour * 72
+	if jwtConfig.SignExpirationTime != 0 {
+		expiration = time.Duration(jwtConfig.SignExpirationTime) * time.Millisecond
+	}
+
 	return &JwtTokenEncoderImpl{
 		jwtSignKeyProvider: jwtSignKeyProvider,
 		issuer:             hostname,
 		jwtConfig:          jwtConfig,
+		expiration:         expiration,
 	}, nil
 }
 
@@ -209,7 +216,7 @@ func (f *JwtTokenEncoderImpl) Encode(username string) (string, error) {
 	now := time.Now()
 	tokenBuilder := jwt.NewBuilder().
 		Issuer(f.issuer).
-		Expiration(now.Add(time.Hour * 72)).
+		Expiration(now.Add(f.expiration)).
 		Subject(username).
 		IssuedAt(now)
 
