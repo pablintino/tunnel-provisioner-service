@@ -1,9 +1,8 @@
 package logging
 
 import (
-	"log"
-
 	"go.uber.org/zap"
+	"log"
 )
 
 var (
@@ -27,6 +26,6 @@ func Initialize(debugMode bool) {
 
 func Release() {
 	if logger != nil {
-		logger.Sync()
+		_ = logger.Sync()
 	}
 }

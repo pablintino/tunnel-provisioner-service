@@ -61,6 +61,7 @@ func run() error {
 		logging.Logger.Errorw("Error booting/running tunnel service", "error", err)
 	}
 
+	logging.Release()
 	return err
 }
 
