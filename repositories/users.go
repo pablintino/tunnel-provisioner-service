@@ -94,8 +94,8 @@ func (l *LDAPUsersRepository) Authenticate(username, password string) (*models.U
 }
 
 func (l *LDAPUsersRepository) bind(conn *ldap.Conn) error {
-	if l.config.BindPassword != nil {
-		return conn.Bind(l.config.BindUser, *l.config.BindPassword)
+	if l.config.BindPassword != "" {
+		return conn.Bind(l.config.BindUser, l.config.BindPassword)
 	} else {
 		return conn.UnauthenticatedBind(l.config.BindUser)
 	}
@@ -103,8 +103,8 @@ func (l *LDAPUsersRepository) bind(conn *ldap.Conn) error {
 
 func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) (map[string]*models.User, error) {
 	filter := ""
-	if l.config.UserFilter != nil {
-		filter = *l.config.UserFilter
+	if l.config.UserFilter != "" {
+		filter = l.config.UserFilter
 	}
 
 	users := make(map[string]*models.User)
@@ -162,8 +162,8 @@ func (l *LDAPUsersRepository) buildUserSearchFilter(username string) string {
 	userCondition := fmt.Sprintf("(%s=%s)", l.config.UserAttribute, username)
 	classCondition := fmt.Sprintf("(objectClass=%s)", l.config.UserClass)
 	userFilter := ""
-	if l.config.UserFilter != nil {
-		userFilter = *l.config.UserFilter
+	if l.config.UserFilter != "" {
+		userFilter = l.config.UserFilter
 	}
 
 	return fmt.Sprintf("(&%s%s%s)", classCondition, userCondition, userFilter)

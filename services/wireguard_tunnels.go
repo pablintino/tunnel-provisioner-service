@@ -166,7 +166,7 @@ func (s *WireguardTunnelServiceImpl) buildTunnelInfo(config *config.Config) {
 				profileId := utils.GenerateInternalIdFromString(profName)
 				profiles[profileId] = models.WireguardTunnelProfileInfo{
 					Name:   profName,
-					Ranges: utils.TryParseNetSlice(profile.Ranges), // Safe as validated on boot
+					Ranges: profile.Ranges, // Safe as validated on boot
 					Id:     profileId,
 				}
 			}
@@ -176,7 +176,7 @@ func (s *WireguardTunnelServiceImpl) buildTunnelInfo(config *config.Config) {
 				Id:        tunnelId,
 				Name:      tunnelName,
 				Provider:  providerName,
-				DNSs:      utils.TryParseIPSlice(tunnelConfig.DNSs), // Safe as validated on boot
+				DNSs:      tunnelConfig.DNSs, // Safe as validated on boot
 				Interface: models.WireguardInterfaceModel{Name: tunnelConfig.Interface, Provider: providerName},
 				Profiles:  profiles,
 			}
