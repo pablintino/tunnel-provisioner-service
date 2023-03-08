@@ -1,9 +1,16 @@
 image: golang:1.19-buster
 
 stages:
+  - lint
   - test
   - build
   - docker-build
+
+go-lint:
+  stage: lint
+  image: golangci/golangci-lint:v1.51
+  script:
+    - golangci-lint run -v
 
 test:
   stage: test
