@@ -6,8 +6,8 @@ import (
 )
 
 type UsersService interface {
-	Login(username, password string) error
-	GetUsers() (map[string]models.User, error)
+	Login(username, password string) (*models.User, error)
+	GetUsers() (map[string]*models.User, error)
 }
 
 type UserServiceImpl struct {
@@ -18,10 +18,10 @@ func NewUserService(usersRepository repositories.UsersRepository) *UserServiceIm
 	return &UserServiceImpl{usersRepository: usersRepository}
 }
 
-func (u *UserServiceImpl) Login(username, password string) error {
+func (u *UserServiceImpl) Login(username, password string) (*models.User, error) {
 	return u.usersRepository.Authenticate(username, password)
 }
 
-func (u *UserServiceImpl) GetUsers() (map[string]models.User, error) {
+func (u *UserServiceImpl) GetUsers() (map[string]*models.User, error) {
 	return u.usersRepository.GetUsers()
 }

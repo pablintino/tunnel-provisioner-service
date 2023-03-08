@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/url"
 	"tunnel-provisioner-service/config"
+	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/models"
 )
 
@@ -17,8 +18,8 @@ const (
 )
 
 type UsersRepository interface {
-	GetUsers() (map[string]models.User, error)
-	Authenticate(username, password string) error
+	GetUsers() (map[string]*models.User, error)
+	Authenticate(username, password string) (*models.User, error)
 }
 
 type LDAPUsersRepository struct {
@@ -30,7 +31,7 @@ func NewLDAPUsersRepository(ldapConfiguration *config.LDAPConfiguration, tlsCust
 	return &LDAPUsersRepository{config: ldapConfiguration, tlsCustomCAs: tlsCustomCAs}
 }
 
-func (l *LDAPUsersRepository) GetUsers() (map[string]models.User, error) {
+func (l *LDAPUsersRepository) GetUsers() (map[string]*models.User, error) {
 
 	connection, err := l.connect()
 	if err != nil {
@@ -47,18 +48,18 @@ func (l *LDAPUsersRepository) GetUsers() (map[string]models.User, error) {
 	return l.retrieveUserSet(connection)
 }
 
-func (l *LDAPUsersRepository) Authenticate(username, password string) error {
+func (l *LDAPUsersRepository) Authenticate(username, password string) (*models.User, error) {
 
 	connection, err := l.connect()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	defer connection.Close()
 
 	err = l.bind(connection)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	result, err := connection.Search(ldap.NewSearchRequest(
@@ -69,27 +70,27 @@ func (l *LDAPUsersRepository) Authenticate(username, password string) error {
 		0,
 		false,
 		l.buildUserSearchFilter(username),
-		[]string{"dn"},
+		[]string{"dn", l.config.UserAttribute, l.config.EmailAttribute},
 		nil,
 	))
 
 	if err != nil {
-		return fmt.Errorf("failed to find user. %s", err)
+		return nil, fmt.Errorf("failed to find user. %s", err)
 	}
 
 	if len(result.Entries) < 1 {
-		return fmt.Errorf("user does not exist")
+		return nil, fmt.Errorf("user does not exist")
 	}
 
 	if len(result.Entries) > 1 {
-		return fmt.Errorf("too many entries returned")
+		return nil, fmt.Errorf("too many entries returned")
 	}
 
 	if err := connection.Bind(result.Entries[0].DN, password); err != nil {
-		return fmt.Errorf("failed to auth. %s", err)
+		return nil, fmt.Errorf("failed to auth. %s", err)
 	}
 
-	return nil
+	return l.buildUserFromLDAPEntry(result.Entries[0])
 }
 
 func (l *LDAPUsersRepository) bind(conn *ldap.Conn) error {
@@ -100,13 +101,13 @@ func (l *LDAPUsersRepository) bind(conn *ldap.Conn) error {
 	}
 }
 
-func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) (map[string]models.User, error) {
+func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) (map[string]*models.User, error) {
 	filter := ""
 	if l.config.UserFilter != nil {
 		filter = *l.config.UserFilter
 	}
 
-	users := make(map[string]models.User)
+	users := make(map[string]*models.User)
 	pagingControl := ldap.NewControlPaging(PageSize)
 
 	for {
@@ -127,10 +128,11 @@ func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) (map[string]model
 		}
 
 		for _, entry := range response.Entries {
-			userId := entry.GetAttributeValue(l.config.UserAttribute)
-			email := entry.GetAttributeValue(l.config.EmailAttribute)
-			if userId != "" {
-				users[userId] = models.User{Email: email, Username: userId}
+			user, err := l.buildUserFromLDAPEntry(entry)
+			if err == nil {
+				users[user.Username] = user
+			} else {
+				logging.Logger.Warnw("cannot map LDAP entry to user model", "user", entry.DN, "error", err.Error())
 			}
 		}
 
@@ -145,6 +147,15 @@ func (l *LDAPUsersRepository) retrieveUserSet(conn *ldap.Conn) (map[string]model
 	}
 
 	return users, nil
+}
+
+func (l *LDAPUsersRepository) buildUserFromLDAPEntry(entry *ldap.Entry) (*models.User, error) {
+	userId := entry.GetAttributeValue(l.config.UserAttribute)
+	email := entry.GetAttributeValue(l.config.EmailAttribute)
+	if userId != "" {
+		return &models.User{Email: email, Username: userId}, nil
+	}
+	return nil, fmt.Errorf("cannot map user entry %s to user as username mapping is empty", entry.DN)
 }
 
 func (l *LDAPUsersRepository) buildUserSearchFilter(username string) string {

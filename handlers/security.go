@@ -3,7 +3,7 @@ package handlers
 import (
 	"github.com/labstack/echo/v4"
 	"net/http"
-	"tunnel-provisioner-service/config"
+	"tunnel-provisioner-service/logging"
 	"tunnel-provisioner-service/security"
 )
 
@@ -17,7 +17,6 @@ type EchoJwtMiddlewareFactory interface {
 
 type EchoJwtMiddlewareFactoryImpl struct {
 	jwtTokenDecoder security.JwtTokenDecoder
-	jwtConfig       *config.JWTConfiguration
 }
 
 func NewEchoJwtMiddlewareFactory(jwtTokenDecoder security.JwtTokenDecoder) *EchoJwtMiddlewareFactoryImpl {
@@ -34,11 +33,14 @@ func (f *EchoJwtMiddlewareFactoryImpl) BuildMiddleware() echo.MiddlewareFunc {
 				return &echo.HTTPError{Code: http.StatusUnauthorized, Message: "missing JWT token"}
 			}
 
-			if user, err := f.jwtTokenDecoder.Decode(tokenString); err == nil {
+			user, err := f.jwtTokenDecoder.Decode(tokenString)
+			if err == nil {
 				// Store user information from token into context.
 				c.Set(contextUserKey, user)
 				return next(c)
 			}
+
+			logging.Logger.Debugw("token validation failed", "token", tokenString, "error", err)
 
 			// Return a generic error to not provide what really happens underneath
 			return &echo.HTTPError{Code: http.StatusUnauthorized, Message: "invalid or expired JWT token"}

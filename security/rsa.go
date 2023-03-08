@@ -21,5 +21,4 @@ func getPemContentBlock(pemBytes []byte, blockType pemBlockType) *pem.Block {
 			return nil
 		}
 	}
-	return nil
 }

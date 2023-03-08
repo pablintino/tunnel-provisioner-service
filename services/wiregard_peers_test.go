@@ -76,8 +76,8 @@ func newTestServices(t *testing.T, testDummyEntities *dummyEntities) *testServic
 type dummyEntities struct {
 	tunnelInfo     models.WireguardTunnelInfo
 	profileInfo    models.WireguardTunnelProfileInfo
-	userList       []models.User
-	userMap        map[string]models.User
+	userList       []*models.User
+	userMap        map[string]*models.User
 	peerIp         net.IP
 	peerPrivateKey string
 	peerPublicKey  string
@@ -86,7 +86,7 @@ type dummyEntities struct {
 func newPeersDummyEntities() *dummyEntities {
 	testDummyEntities := &dummyEntities{}
 	const providerName = "routeros"
-	testDummyEntities.userMap = map[string]models.User{
+	testDummyEntities.userMap = map[string]*models.User{
 		"test-user-1": {Username: "test-user-1", Email: "testuser1@test.com"},
 		"test-user-2": {Username: "test-user-2", Email: "testuser2@test.com"},
 	}

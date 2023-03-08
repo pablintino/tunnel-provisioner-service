@@ -35,10 +35,10 @@ func (m *MockUsersService) EXPECT() *MockUsersServiceMockRecorder {
 }
 
 // GetUsers mocks base method.
-func (m *MockUsersService) GetUsers() (map[string]models.User, error) {
+func (m *MockUsersService) GetUsers() (map[string]*models.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetUsers")
-	ret0, _ := ret[0].(map[string]models.User)
+	ret0, _ := ret[0].(map[string]*models.User)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -50,11 +50,12 @@ func (mr *MockUsersServiceMockRecorder) GetUsers() *gomock.Call {
 }
 
 // Login mocks base method.
-func (m *MockUsersService) Login(username, password string) error {
+func (m *MockUsersService) Login(username, password string) (*models.User, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Login", username, password)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*models.User)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // Login indicates an expected call of Login.

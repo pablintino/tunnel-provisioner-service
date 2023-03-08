@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/x509"
 	"os"
 	"os/signal"
 	"tunnel-provisioner-service/config"
@@ -35,24 +34,16 @@ func run() error {
 		return err
 	}
 
-	var tlsCustomCAs *x509.CertPool
-	if configuration.Security.CustomCAsPath != "" {
-		tlsCustomCAs, err = security.NewTLSCustomCAs(configuration.Security.CustomCAsPath)
-		if err != nil {
-			logging.Logger.Errorw("Error reading/loading TLS certificates", "error", err)
-			return err
-		}
-	}
-
 	sigIntChan := make(chan os.Signal, 1)
 	signal.Notify(sigIntChan, os.Interrupt)
 
 	// Create containers
 	securityContainer, err := security.NewContainer(configuration)
 	if err != nil {
+		logging.Logger.Errorw("Error booting security components", "error", err)
 		return err
 	}
-	reposContainer, err := repositories.NewContainer(tlsCustomCAs, configuration)
+	reposContainer, err := repositories.NewContainer(securityContainer.TLSCustomCAs, configuration)
 	if err != nil {
 		return err
 	}

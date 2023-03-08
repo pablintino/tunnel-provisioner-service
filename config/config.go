@@ -2,16 +2,14 @@ package config
 
 import (
 	"fmt"
-	"net"
-	"net/url"
-	"strings"
-	"tunnel-provisioner-service/utils"
-
 	"github.com/knadh/koanf"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
+	"net"
+	"net/url"
+	"strings"
 )
 
 type LDAPConfiguration struct {
@@ -66,6 +64,7 @@ type JWTConfiguration struct {
 	UsernameClaim      string `koanf:"usernameClaim"`
 	EmailClaim         string `koanf:"emailClaim"`
 	SignExpirationTime uint64 `koanf:"signExpirationTimeMs"`
+	KeySignAlgorithm   string `koanf:"keySignAlgorithm"`
 }
 
 type SecurityConfiguration struct {
@@ -193,10 +192,16 @@ func New(path string) (*Config, error) {
 func loadConfig(path string, config *Config) (*Config, error) {
 	koanfInstance := koanf.New(".")
 	err := koanfInstance.Load(confmap.Provider(map[string]interface{}{
-		"port":              8080,
-		"syncPeriodMs":      900000,
-		"mongodb.timeoutMs": 3000,
-		"security.jwt.key":  utils.RandString(128),
+		"port":                              8080,
+		"syncPeriodMs":                      900000,
+		"mongodb.timeoutMs":                 3000,
+		"security.jwt.usernameClaim":        "preferred_username",
+		"security.jwt.emailClaim":           "email",
+		"security.jwt.signExpirationTimeMs": 86400000,
+		"security.jwt.keySignAlgorithm":     "RS256",
+		"ldap.userAttribute":                "uid",
+		"ldap.emailAttribute":               "mail",
+		"ldap.userClass":                    "inetOrgPerson",
 	}, "."), nil)
 	if err != nil {
 		return nil, err

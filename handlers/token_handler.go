@@ -4,6 +4,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"net/http"
+	"tunnel-provisioner-service/models"
 	"tunnel-provisioner-service/security"
 	"tunnel-provisioner-service/services"
 )
@@ -31,10 +32,7 @@ func NewTokenHandler(group *echo.Group, usersService services.UsersService,
 }
 
 func (h *TokenHandler) tokenHandler(c echo.Context) error {
-
-	user := c.Get(userProp).(string)
-
-	userToken, err := h.jwtTokenEncoder.Encode(user)
+	userToken, err := h.jwtTokenEncoder.Encode(c.Get(userProp).(*models.User))
 	if err != nil {
 		return err
 	}
@@ -45,8 +43,8 @@ func (h *TokenHandler) tokenHandler(c echo.Context) error {
 }
 
 func (h *TokenHandler) basicAuthValidate(username, password string, c echo.Context) (bool, error) {
-	if h.usersService.Login(username, password) == nil {
-		c.Set(userProp, username)
+	if userModel, err := h.usersService.Login(username, password); err == nil {
+		c.Set(userProp, userModel)
 		return true, nil
 	}
 	return false, nil

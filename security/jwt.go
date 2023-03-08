@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
@@ -11,6 +12,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"net/http"
 	"strings"
 	"time"
 	"tunnel-provisioner-service/config"
@@ -23,17 +25,19 @@ type JwtSignKeyProvider interface {
 }
 
 type JwtSignKeyProviderImpl struct {
-	jwtConfig *config.JWTConfiguration
-	keySet    jwk.Set
-	signKey   jwk.Key
+	jwtConfig  *config.JWTConfiguration
+	keySet     jwk.Set
+	signKey    jwk.Key
+	httpClient jwk.HTTPClient
 }
 
-func NewJwtSignKeyProvider(jwtConfig *config.JWTConfiguration) (*JwtSignKeyProviderImpl, error) {
+func NewJwtSignKeyProvider(jwtConfig *config.JWTConfiguration, tlsCustomCAs *x509.CertPool) (*JwtSignKeyProviderImpl, error) {
 	provider := &JwtSignKeyProviderImpl{
-		jwtConfig: jwtConfig,
+		jwtConfig:  jwtConfig,
+		httpClient: buildHttpClient(tlsCustomCAs),
 	}
 
-	var err error = nil
+	var err error
 	if jwtConfig.JWKSUrl != "" {
 		err = provider.initializeWithRemoteJwk()
 	} else if jwtConfig.JWTValidationKey != "" {
@@ -41,7 +45,7 @@ func NewJwtSignKeyProvider(jwtConfig *config.JWTConfiguration) (*JwtSignKeyProvi
 	} else if jwtConfig.JWTSignPrivateKey != "" {
 		err = provider.initializeWithProvidedPrivateKey()
 	} else {
-		provider.initializeWithRandomKey()
+		err = provider.initializeWithRandomKey()
 	}
 
 	if err != nil {
@@ -53,7 +57,7 @@ func NewJwtSignKeyProvider(jwtConfig *config.JWTConfiguration) (*JwtSignKeyProvi
 
 func (p *JwtSignKeyProviderImpl) initializeWithRemoteJwk() error {
 	cache := jwk.NewCache(context.Background())
-	err := cache.Register(p.jwtConfig.JWKSUrl, jwk.WithMinRefreshInterval(15*time.Minute))
+	err := cache.Register(p.jwtConfig.JWKSUrl, jwk.WithMinRefreshInterval(15*time.Minute), jwk.WithHTTPClient(p.httpClient))
 	if err != nil {
 		return err
 	}
@@ -61,7 +65,18 @@ func (p *JwtSignKeyProviderImpl) initializeWithRemoteJwk() error {
 	return nil
 }
 
-func (p *JwtSignKeyProviderImpl) initializeWithRandomKey() {
+func buildHttpClient(tlsCustomCAs *x509.CertPool) jwk.HTTPClient {
+	if tlsCustomCAs != nil {
+		return &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: tlsCustomCAs,
+			},
+		}}
+	}
+	return &http.Client{}
+}
+
+func (p *JwtSignKeyProviderImpl) initializeWithRandomKey() error {
 	// Generate RSA key.
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -86,10 +101,7 @@ func (p *JwtSignKeyProviderImpl) initializeWithRandomKey() {
 	p.signKey = privateKey
 	p.keySet = jwk.NewSet()
 
-	if err := p.initKeySetFromPrivateKey(key); err != nil {
-		// As PK is generated here format is controlled, and it shouldn't fail
-		panic(err.Error())
-	}
+	return p.initKeySetFromPrivateKey(key)
 }
 
 func (p *JwtSignKeyProviderImpl) initKeySetFromPrivateKey(key *rsa.PrivateKey) error {
@@ -100,25 +112,24 @@ func (p *JwtSignKeyProviderImpl) initKeySetFromPrivateKey(key *rsa.PrivateKey) e
 		},
 	)
 
-	k, err := jwk.ParseKey(pubPEM, jwk.WithPEM(true))
+	pubKey, err := jwk.ParseKey(pubPEM, jwk.WithPEM(true))
 	if err != nil {
 		return err
 	}
-	if err := jwk.AssignKeyID(k); err != nil {
+	if err := jwk.AssignKeyID(pubKey); err != nil {
 		return err
 	}
 
-	if err := p.keySet.AddKey(k); err != nil {
+	if err := p.keySet.AddKey(pubKey); err != nil {
 		return err
 	}
 
-	return nil
+	return pubKey.Set(jwk.AlgorithmKey, p.jwtConfig.KeySignAlgorithm)
 }
 
 func (p *JwtSignKeyProviderImpl) initializeWithProvidedPrivateKey() error {
 	privateKey, err := p.getKeyFromEncodedData(p.jwtConfig.JWTSignPrivateKey, pemBlockTypeRsaPrivateKeyHeader)
 	if err != nil {
-		// Should never reach this as key is generated here and not provided from environment
 		return err
 	}
 
@@ -170,6 +181,10 @@ func (p *JwtSignKeyProviderImpl) getKeyFromEncodedData(encodedKey string, pemTyp
 		return nil, err
 	}
 
+	if err := jwtKey.Set(jwk.AlgorithmKey, p.jwtConfig.KeySignAlgorithm); err != nil {
+		return nil, err
+	}
+
 	return jwtKey, err
 }
 
@@ -182,37 +197,34 @@ func (p *JwtSignKeyProviderImpl) GetSignKey() jwk.Key {
 }
 
 type JwtTokenEncoder interface {
-	Encode(username string) (string, error)
+	Encode(user *models.User) (string, error)
 }
 
 type JwtTokenEncoderImpl struct {
 	jwtSignKeyProvider JwtSignKeyProvider
 	jwtConfig          *config.JWTConfiguration
-	expiration         time.Duration
 }
 
 func NewJwtTokenEncoder(jwtSignKeyProvider JwtSignKeyProvider, jwtConfig *config.JWTConfiguration) *JwtTokenEncoderImpl {
-	expiration := time.Hour * 72
-	if jwtConfig.SignExpirationTime != 0 {
-		expiration = time.Duration(jwtConfig.SignExpirationTime) * time.Millisecond
-	}
-
 	return &JwtTokenEncoderImpl{
 		jwtSignKeyProvider: jwtSignKeyProvider,
 		jwtConfig:          jwtConfig,
-		expiration:         expiration,
 	}
 }
 
-func (f *JwtTokenEncoderImpl) Encode(username string) (string, error) {
+func (f *JwtTokenEncoderImpl) Encode(user *models.User) (string, error) {
 	now := time.Now()
 	tokenBuilder := jwt.NewBuilder().
-		Expiration(now.Add(f.expiration)).
-		Subject(username).
+		Expiration(now.Add(time.Duration(f.jwtConfig.SignExpirationTime) * time.Millisecond)).
+		Subject(user.Username).
 		IssuedAt(now)
 
 	if f.jwtConfig.UsernameClaim != "" {
-		tokenBuilder = tokenBuilder.Claim(f.jwtConfig.UsernameClaim, username)
+		tokenBuilder = tokenBuilder.Claim(f.jwtConfig.UsernameClaim, user.Username)
+	}
+
+	if f.jwtConfig.EmailClaim != "" {
+		tokenBuilder = tokenBuilder.Claim(f.jwtConfig.EmailClaim, user.Email)
 	}
 
 	// Hardcode audience if specified in configuration
@@ -230,7 +242,7 @@ func (f *JwtTokenEncoderImpl) Encode(username string) (string, error) {
 		return "", err
 	}
 
-	signed, err := jwt.Sign(token, jwt.WithKey(jwa.RS256, f.jwtSignKeyProvider.GetSignKey()))
+	signed, err := jwt.Sign(token, jwt.WithKey(jwa.KeyAlgorithmFrom(f.jwtConfig.KeySignAlgorithm), f.jwtSignKeyProvider.GetSignKey()))
 	if err != nil {
 		return "", err
 	}

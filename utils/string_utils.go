@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"strings"
 	"time"
-	"unsafe"
 )
 
 var (
@@ -73,23 +72,4 @@ func SanitizeStringWithValues(command string, toMaskValues ...string) string {
 		}
 	}
 	return res
-}
-
-func RandString(n int) string {
-	// From https://stackoverflow.com/questions/22892120/how-to-generate-a-random-string-of-a-fixed-length-in-go
-	b := make([]byte, n)
-	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
-	for i, cache, remain := n-1, randSource.Int63(), letterIdxMax; i >= 0; {
-		if remain == 0 {
-			cache, remain = randSource.Int63(), letterIdxMax
-		}
-		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
-			b[i] = letterBytes[idx]
-			i--
-		}
-		cache >>= letterIdxBits
-		remain--
-	}
-
-	return *(*string)(unsafe.Pointer(&b))
 }
