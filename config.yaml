@@ -7,9 +7,6 @@ ldap:
   bindUser: cn=admin,dc=my-company,dc=com
   bindPassword: 12345
   userFilter: (memberOf=CN=Test Group,OU=groups,DC=my-company,DC=com)
-  userAttribute: uid
-  emailAttribute: mail
-  userClass: inetOrgPerson
 providers:
   routeros:
     mk-test:
@@ -30,41 +27,3 @@ providers:
                 - 10.10.120.0/24
                 - 10.10.100.0/23
                 - 10.10.110.0/24
-security:
-  customCaCerts: /home/pablintino/Desktop/certs
-  jwt:
-    usernameClaim: preferred_username
-    audience: test-tunnel-provisioner
-#    jwksUrl: http://localhost:8765/realms/test-realm/protocol/openid-connect/certs
-    signPrivateKey: >
-      LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcEFJQkFBS0NBUUVBdXFQRUFRYVFv
-      NEtlREtSaVdhV1BlaHBGdHd1RFJsalR3NU9MZm05R0djbyt5T0xRCjVraGNGMUtncXFKRXVPWWMx
-      ZTFYeTNiWVJKcVRtKzRLNEtLSlczTGZhcnZCblRyUHY3WXN1UEl1N3o5dmlOK2oKeHBqMCtrL0c3
-      b2JMUVhhY1J0L2NrZTljWnk3TWFLdkRaRW9VeS8vS04rbEdwSTBhakhWU3Bqb3lWZm5YTUp0LwpK
-      SFR0VnhyTGdzVUc0WGhEeUJ4TTVRWGRCcHAzSnE3USs0Y25kNUJKQ2VNRktoMFBra0FLaStJbWpa
-      bWhpVCt0CkFmUnZLMjFPTXZpWEpidUxjZ0k4QmRBbUc0QzB4MXFZUGEwSlNsOUJZd1ZYVGJZdW5D
-      OVQwaEZFR1gyZENYc3kKOU51cWR0SmdTWmFkemVCZlpLTDlpYVNnbEJuZEpsOVhBc2hVS3dJREFR
-      QUJBb0lCQUJpVU1JcDNYdHpwcFZRWApqSXd2R0J5d1ptQ2JZakpheUZNeWxHV1dLZGt1U281bld3
-      aTRuQjF3MkRwMXh0bkN2dEZvRnU1elBEcVhVTHZHCjRYcUJGOWhmTncrZ29rMXp6VXJRcHZCdTZj
-      SVZkemx0NzVlR2Y5eVJzbFQvUGcwNlNEZXlpM2hSMldLMzhGdG8KZUt3MXhWU3kzdUtndjBPSnJE
-      d0xIS2lmZEE3ZzcrUmRyR1gvMVd5YjRZeUV2cG1ZRUo4NGhMcmt5WjZCNFhUWgo1YkswT3pTVGd4
-      R2M1SmF4RGJlcjhoNVJ3VnBxclY0U0I1QUNrbEpHVTN4eUdLcmJFQXMvWm1xVXlDazhWNEdqCjc3
-      ODRERmp1dDRMNDhVMytPeWs3VVRXMG9GNy9DQmw1Y0FxbFVKckIrYVBlSEt5eGhqKzRhNmV2Ymt5
-      Yno4YVIKT0EvQ3NxRUNnWUVBMlZqYXBwWDNNZGVFYmxJSGZEWXJhRlFCOGNmanZZYzRSZThjR3hr
-      QkQzOEtvVnJGdzg5UApNejhWUExoNitzTndzeExZRy90bCs4T2JMeHpKcC9rT3M3VGwvNC9QSEZT
-      Z3ZOTTJqVlRKK0RZZDNFb2QzM2FBCjd6WDA4UmJ1YXlWTGpQaTF4ZDV3RGtLeFdCSnFSYlFyRXZI
-      T2poUDF4SGRjKzJhUHJMRms5NjhDZ1lFQTI5VG0KSGl3Z1M2UVhnWnBpOWhmN0N6L3hsUndqbkZX
-      MnY3VzJ0QlphejEvbXdoSEFGNFk0UEN0OWFIbFFlczJqcUhwMAoySmFSM0tqY0NSZ25STERHeDZj
-      ak9mMWRPWFBZeWNmbThCN2dsb2NOMlhxbjAyTnNMN2JmdE93OXJkdFdSdDJDCmdRU0xKeU1CeHRO
-      NlVZZjhBUDNzVjJrc1ZFSzRvNElCbmQ3YURrVUNnWUVBdWFiNFBjdGpkeU9NYjErS0hVTjQKR0lt
-      Smo2a2FrMDNwZDNNakl0SmM0WXUyM05UWWtNV0g5Vkl4SmNpKzQyd0YzRENBZ0laaE9vaC9DZU1o
-      TFdYRQpkU1JVUWRQcEtWM3dYdHBiZ3FXbVQycUtYeHpBSDV6dHpXYmRid0lUYlZwU0NueDNhQ2ow
-      dG5tcFduMkFZVUhnCmVUSXJLWmxMR1NLTVBnSUJQNVhYbE9rQ2dZQnZuL1dSa0pwOWpqOFpZa21w
-      NkpkaktQOEUxaHNIQVVjZ3BhYTIKWHp1UlhZTVJQRzRzQTgxK1VCOEg4OEgzK1grR3gxZVp1eXNw
-      dnR5c0NZVzNEWVNDVU01RVhmRCtnV0t0WTBKUwozM3J2TkhqRjI5Qm9PRzN3OUkwM2sxWG1lQito
-      TUUxYU1mSnUxd25KNmd5TVpkNkNxbTFlSFZ1VEZhWW44SlhkCmtoRnJlUUtCZ1FDWEJrVEZibzlh
-      VGcwRFNkNFJlaGlFK2I1OVN3MVkzTkhBT2tBZWhRSUNUNnBzb0NHYVN1bWwKNTUrVkV3UTR0aE4z
-      Z2JsL3hwbS9ESm1wMlRsejBvNzY2TWhSQnJyNnZIZ2dtWU1aT1R6bitrbmJ3VDBMR3EyTApqSTRD
-      UnhMWGhjRThMSTdQWklzdGhzNWFFNkIvSTE3M1lhTTR3NjVCTFhoT3psN0x1RTc1Qmc9PQotLS0t
-      LUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQo=
-port: 8081
