@@ -12,12 +12,12 @@ go-lint:
   script:
     - golangci-lint run -v
 
-test:
+go-test:
   stage: test
   script:
     - go test ./... -v
 
-compile:
+go-compile:
   stage: build
   script:
     - ./automation/build
@@ -46,3 +46,23 @@ docker-build:
     # Run only on master
     - if: $CI_COMMIT_REF_NAME == "master" && $CI_COMMIT_TAG == null
       when: on_success
+
+docker-release-tag:
+  stage: docker-build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [ "" ]
+  allow_failure: false
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_HARBOR_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "${CI_HARBOR_ROBOT_USER}" "${CI_HARBOR_ROBOT_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+    - cat /etc/ssl/custom/root_ca.crt >> /kaniko/ssl/certs/additional-ca-cert-bundle.crt
+  script:
+    - >-
+      /kaniko/executor
+      --context "${CI_PROJECT_DIR}"
+      --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+      --destination "${CI_HARBOR_REGISTRY}/arq-svcs-rel/tunnel-provider-service:${CI_COMMIT_REF_NAME}"
+      --destination "${CI_HARBOR_REGISTRY}/arq-svcs-rel/tunnel-provider-service:latest"
+  only:
+    - tags
