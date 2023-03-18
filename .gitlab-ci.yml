@@ -1,4 +1,4 @@
-image: golang:1.19-buster
+image: registry.internal.pablintino.net/tools-rel/go-builder:v0.0.1
 
 stages:
   - lint
@@ -8,17 +8,22 @@ stages:
 
 go-lint:
   stage: lint
-  image: golangci/golangci-lint:v1.51
+  before_script:
+    - source <(builder2 source)
   script:
     - golangci-lint run -v
 
 go-test:
   stage: test
+  before_script:
+    - source <(builder2 source)
   script:
     - go test ./... -v
 
 go-compile:
   stage: build
+  before_script:
+    - source <(builder2 source)
   script:
     - ./automation/build
   artifacts:
